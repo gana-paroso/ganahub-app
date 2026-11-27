@@ -43,7 +43,8 @@
       "main.js",
       "preload.js",
       "src/**",
-      "ui/**"
+      "ui/**",
+      "build/icon.ico"
     ],
     "win": {
       "target": "nsis",

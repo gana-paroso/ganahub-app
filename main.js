@@ -1,8 +1,9 @@
 // Electron 메인 프로세스: 창 생성과 화면(renderer)이 호출하는 기능(IPC)을 연결한다.
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Tray, Menu, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const updater = require('./src/updater');
+const { attachTray } = require('./src/tray');
 const { createStore } = require('./src/store');
 const { createSettings, fileExists } = require('./src/settings');
 const share = require('./src/share');
@@ -29,7 +30,7 @@ const works = createWorks(store, settings);
 
 if (!app.requestSingleInstanceLock()) app.quit(); // 같은 설정 파일을 두 앱이 동시에 쓰지 않도록 하나만 허용
 
-let win;
+let win, trayUi; // trayUi 는 트레이 아이콘이 사라지지 않게 붙들어 둔다
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600, title: 'GanaHub', backgroundColor: '#f6f8fa', autoHideMenuBar: true,
@@ -41,9 +42,10 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(uiUrl)) { e.preventDefault(); external(url); } });
   win.loadFile(path.join(__dirname, 'ui', 'projects-list-toss.html'));
+  trayUi = attachTray({ app, Tray, Menu, nativeImage }, win, path.join(__dirname, 'build', 'icon.ico')); // 닫기(X)는 종료가 아니라 트레이로 숨김
 }
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+app.on('second-instance', () => trayUi?.show()); // 또 실행하면 트레이에 숨은 창을 다시 보여 준다
 app.whenReady().then(() => {
   try { store.backupOnce(); } catch (e) { console.error('설정 백업 실패:', e.message); } // 구 앱으로 되돌릴 때 쓰는 최초 사본
   createWindow();

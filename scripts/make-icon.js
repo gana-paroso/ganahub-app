@@ -1,13 +1,13 @@
 // build/icon.svg 를 여러 크기의 PNG 로 그려서 build/icon.ico 로 묶는다. (설치 파일과 실행 파일의 아이콘)
-// 실행: npx electron scripts/make-icon.js   (환경 변수 ICON_PREVIEW_DIR 를 주면 크기별 PNG 도 그 폴더에 저장한다)
+// 실행: npx electron scripts/make-icon.js [svg 경로] [ico 경로]   (둘 다 생략하면 build/ 의 것. 환경 변수 ICON_PREVIEW_DIR 를 주면 크기별 PNG 도 그 폴더에 저장한다)
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
-const SVG = path.join(__dirname, '..', 'build', 'icon.svg');
-const OUT = path.join(__dirname, '..', 'build', 'icon.ico');
+const SVG = process.argv[2] || path.join(__dirname, '..', 'build', 'icon.svg');
+const OUT = process.argv[3] || path.join(__dirname, '..', 'build', 'icon.ico');
 
 app.commandLine.appendSwitch('force-device-scale-factor', '1'); // 화면 배율과 상관없이 정확한 픽셀 크기로 그린다
 
@@ -19,7 +19,9 @@ async function render(svg, size) {
   fs.writeFileSync(file, html);
   await win.loadFile(file);
   await new Promise(r => setTimeout(r, 150));
-  const img = (await win.webContents.capturePage()).resize({ width: size, height: size });
+  // 창이 요청한 크기보다 크게 만들어질 수 있어서(최소 창 크기), 줄이지 않고 왼쪽 위의 size x size 영역만 잘라 쓴다
+  const img = await win.webContents.capturePage({ x: 0, y: 0, width: size, height: size });
+  if (img.getSize().width !== size || img.getSize().height !== size) throw new Error(`${size}px 아이콘을 정확한 크기로 그리지 못했어요 (${img.getSize().width}x${img.getSize().height})`);
   if (img.toBitmap()[3] !== 0) console.warn(`경고: ${size}px 아이콘의 배경이 투명하지 않아요`); // 왼쪽 위 모서리의 투명도 확인
   const png = img.toPNG();
   win.destroy();
