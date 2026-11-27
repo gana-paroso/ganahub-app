@@ -24,6 +24,17 @@ test('릴리즈 빌드 전에 공개 전 검사를 실행한다 (금지 목록�
   assert.ok(workflow.indexOf('check-secrets') < workflow.indexOf('npx electron-builder'), '검사가 빌드보다 먼저여야 한다');
 });
 
+test('버전 태그(v + 숫자 3개)에만 반응하고, 다른 모양의 태그는 실행하지 않는다', () => {
+  assert.ok(workflow.includes("tags: ['v[0-9]+.[0-9]+.[0-9]+']"));
+  assert.ok(!workflow.includes("tags: ['v*']"));
+});
+
+test('빌드 전에 태그 이름에서 버전을 정하고, package.json 버전과 비교하지 않는다', () => {
+  assert.ok(workflow.includes('npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version'));
+  assert.ok(workflow.indexOf('npm version') < workflow.indexOf('npx electron-builder'), '버전 설정이 빌드보다 먼저여야 한다');
+  assert.ok(!workflow.includes("require('./package.json').version"));
+});
+
 test('저장 위치 폴더 이름이 기존 앱(GanaHub)과 같다', () => {
   assert.strictEqual(pkg.build.productName, 'GanaHub');
 });
