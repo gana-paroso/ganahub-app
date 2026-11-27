@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디렉토리 조회 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="projects">
+<aside class="app-side" id="side"></aside>
+<main class="app-main t-main">
+  <div class="t-top">
+    <div>
+      <h1 id="title"></h1>
+      <p class="t-lead">공유폴더 안의 파일을 찾아서 바로 열어요.</p>
+    </div>
+  </div>
+
+  <form class="t-search wide" id="searchForm" role="search">
+    <div class="search-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input class="input" id="q" type="search" placeholder="파일 이름으로 찾기 (하위 폴더 포함)" aria-label="파일명 검색" autocomplete="off"></div>
+    <button class="btn t-cta" type="submit">검색</button>
+    <button class="btn" type="button" id="clear" hidden>초기화</button>
+    <div class="t-acts"><a class="btn" href="projects-list-toss.html">목록</a><a class="btn" id="goDetail" href="#">상세보기</a></div>
+  </form>
+
+  <div class="t-path">
+    <button class="btn" type="button" id="up" aria-label="상위 폴더로 이동" title="상위 폴더로 이동"></button>
+    <nav class="t-crumb" id="path" aria-label="폴더 경로"></nav>
+  </div>
+
+  <section class="t-card fill" id="wrap" style="display:flex;flex-direction:column">
+    <div id="body" style="flex:1;min-height:0;overflow:auto;padding:8px 8px 0" aria-live="polite"></div>
+    <div class="t-foot"><span id="count"></span><span>폴더 이름을 누르면 안으로 들어가요</span></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+<script>
+/* 공유폴더의 프로젝트 폴더를 탐색기처럼 본다. 항목이 많아도 화면에 보이는 줄만 그리는 가상 스크롤을 쓴다. */
+const $ = id => document.getElementById(id);
+const name = new URLSearchParams(location.search).get("n") || "";
+$("title").textContent = name.replace(/\[.+\]$/, "");
+$("goDetail").href = "project-detail-toss.html?n=" + encodeURIComponent(name);
+$("up").innerHTML = icon("up");
+
+const ROW = 56; // 한 줄 높이(px). toss.css 의 .vrow 와 같아야 한다
+let path = [], term = "", items = [], total = 0, loading = true, error = "", seq = 0;
+const size = b => b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(0) + " KB" : b < 1073741824 ? (b / 1048576).toFixed(1) + " MB" : (b / 1073741824).toFixed(1) + " GB";
+const byKo = (a, b) => b.isDir - a.isDir || a.name.localeCompare(b.name, "ko"); // 폴더 먼저, 이름순
+
+function row(it, i) {
+  const d = it.isDir, enc = esc(it.path);
+  const nm = d ? `<button class="fname" type="button" data-go="${enc}">${icon("folder")}${esc(it.name)}</button>` : `<span class="fname">${icon("file")}${esc(it.name)}</span>`;
+  const sub = term ? `<div class="cell-sub">${esc(["", ...it.path.split("/").slice(0, -1)].join(" / ") || "/")}</div>` : "";
+  return `<div class="t-file vrow" style="top:${i * ROW}px"><div>${nm}${sub}</div><span class="r num muted">${d ? "—" : it.size == null ? "" : size(it.size)}</span><span class="num muted">${it.modified || (d ? "—" : "")}</span>
+    <span class="r acts">${d ? "" : `<button class="t-go" type="button" data-reveal="${enc}">위치 보기</button>`}<button class="t-go" type="button" data-open="${enc}" aria-label="${esc(it.name)} 열기">${d ? "탐색기로 열기" : "열기"}</button></span></div>`;
+}
+
+/** 스크롤 위치에서 보이는 줄(앞뒤 5줄 여유)만 그린다. */
+function renderRows() {
+  const body = $("body"), vs = $("vs"); if (!vs) return;
+  const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 5), last = Math.min(items.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 5);
+  vs.innerHTML = items.slice(first, last).map((it, k) => row(it, first + k)).join("");
+  fetchStats(first, last);
+}
+
+/** 검색 결과는 이름만 받아 오므로, 보이는 줄의 크기·수정일을 따로 읽어 채운다. */
+function fetchStats(first, last) {
+  const need = items.slice(first, last).filter(it => it.fetched === false && !it.busy);
+  if (!need.length) return;
+  need.forEach(it => { it.busy = true; });
+  const mine = seq;
+  api.dir.stat(name, need.map(it => it.path)).then(res => {
+    if (mine !== seq) return;
+    need.forEach((it, i) => { it.fetched = true; if (res[i]) { it.size = res[i].size; it.modified = res[i].modified; } });
+    renderRows();
+  }).catch(() => need.forEach(it => { it.fetched = true; }));
+}
+
+function draw() {
+  $("up").disabled = !path.length || !!term;
+  $("clear").hidden = !term;
+  $("path").innerHTML = [["", "프로젝트 루트"], ...path.map((k, i) => [path.slice(0, i + 1).join("/"), k])].map(([p, l], i, a) =>
+    `${i ? '<span class="sep">›</span>' : ""}<button type="button" data-go="${esc(p)}"${i === a.length - 1 && !term ? " aria-current=page" : ""}>${esc(l)}</button>`).join("");
+  const body = $("body");
+  if (loading) {
+    body.innerHTML = `<div class="loading" role="status"><div class="bar"><i></i></div><p class="field-msg" style="margin:12px 0 8px">${term ? "하위 폴더까지 찾고 있어요…" : "폴더 정보를 불러오고 있어요…"}</p>${[55, 40, 62, 36].map(w => `<div class="skel"><i style="width:${w}%"></i></div>`).join("")}</div>`;
+    $("count").textContent = ""; return;
+  }
+  if (error) {
+    body.innerHTML = `<div class="state"><div class="ico">${icon("alert")}</div><h2>불러오지 못했어요</h2><p>${esc(error)}</p><div class="btns"><button class="btn" type="button" data-retry>다시 시도</button></div></div>`;
+    $("count").textContent = ""; return;
+  }
+  $("count").textContent = term ? `‘${term}’ 검색 결과 ${total}개${total > items.length ? ` (앞의 ${items.length}개만 보여요)` : ""}`
+    : `폴더 ${items.filter(i => i.isDir).length}개 · 파일 ${items.filter(i => !i.isDir).length}개`;
+  if (!items.length) {
+    body.innerHTML = `<div class="state"><div class="ico">${icon(term ? "search" : "folder")}</div><h2>${term ? "검색 결과가 없어요" : "비어 있는 폴더예요"}</h2><p>${term ? "파일명을 바꾸거나 초기화해 볼까요?" : "이 폴더에는 파일이 없어요."}</p>${term ? '<div class="btns"><button class="btn" type="button" data-reset>검색 초기화</button></div>' : ""}</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="t-file th"><span>이름</span><span class="r">크기</span><span>수정일</span><span></span></div><div id="vs" style="position:relative;height:${items.length * ROW}px"></div>`;
+  body.scrollTop = 0; renderRows();
+}
+
+/** 지금 폴더(또는 검색어)에 맞는 항목을 서버에서 가져온다. 먼저 보낸 요청이 늦게 끝나도 마지막 요청만 반영한다. */
+async function load() {
+  const mine = ++seq; loading = true; error = ""; draw();
+  try {
+    if (term) { const r = await api.dir.search(name, term); if (mine !== seq) return; items = r.rows.map(x => ({ ...x, fetched: false })); total = r.total; }
+    else { const r = await api.dir.list(name, path.join("/")); if (mine !== seq) return; items = r.sort(byKo); total = items.length; }
+  } catch (e) { if (mine !== seq) return; items = []; error = e.message; }
+  loading = false; draw();
+}
+function go(p) { term = ""; $("q").value = ""; path = p ? p.split("/") : []; load(); }
+
+$("body").addEventListener("click", async e => {
+  const g = e.target.closest("[data-go]"); if (g) return go(g.dataset.go);
+  if (e.target.closest("[data-reset]")) { term = ""; $("q").value = ""; return load(); }
+  if (e.target.closest("[data-retry]")) return load();
+  const o = e.target.closest("[data-open]"), r = e.target.closest("[data-reveal]");
+  try { if (o) await api.dir.open(name, o.dataset.open); else if (r) await api.dir.reveal(name, r.dataset.reveal); } catch (err) { toast(err.message); }
+});
+$("body").addEventListener("scroll", renderRows);
+window.addEventListener("resize", renderRows);
+$("path").addEventListener("click", e => { const g = e.target.closest("[data-go]"); if (g) go(g.dataset.go); });
+$("up").addEventListener("click", () => go(path.slice(0, -1).join("/")));
+$("searchForm").addEventListener("submit", e => { e.preventDefault(); term = $("q").value.trim(); load(); }); // ‘검색’을 눌러야 바뀌어요
+$("clear").addEventListener("click", () => { term = ""; $("q").value = ""; load(); });
+
+api.dir.index(name).catch(() => {}); // 들어오자마자 폴더 전체 색인을 뒤에서 만들어 두면 검색이 바로 나온다
+load();
+</script>
+</body>
+</html>

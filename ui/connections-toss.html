@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>연결 관리 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="conn">
+<aside class="app-side" id="side"></aside>
+
+<main class="app-main t-main">
+  <!-- 목록 화면 -->
+  <div id="vList" class="t-view">
+    <div class="t-top"><div><h1>연결 관리</h1>
+      <p class="t-lead">SSH·Git·Jenkins 접속 정보를 한 곳에 모아 두면 DB 관리와 IDE 관리에서 가져다 써요.</p></div></div>
+    <div class="t-row-ctl">
+      <div class="t-seg" role="tablist" id="filters" aria-label="연결 종류">
+        <button type="button" role="tab" data-f="all" aria-selected="true">전체<span class="n num" id="n-all"></span></button>
+        <button type="button" role="tab" data-f="ssh" aria-selected="false">SSH<span class="n num" id="n-ssh"></span></button>
+        <button type="button" role="tab" data-f="git" aria-selected="false">Git<span class="n num" id="n-git"></span></button>
+        <button type="button" role="tab" data-f="jenkins" aria-selected="false">Jenkins<span class="n num" id="n-jenkins"></span></button>
+      </div>
+      <div class="t-acts"><button class="btn t-cta" type="button" id="add">+ 연결 추가</button></div>
+    </div>
+    <section class="t-card fill" id="list" aria-label="연결 목록"></section>
+  </div>
+
+  <!-- 추가·수정 화면 -->
+  <div id="vForm" class="t-view" hidden>
+    <div class="t-top"><div><h1 id="fTitle">연결 추가</h1>
+      <p class="t-lead">비밀번호와 토큰은 이 PC에서만 암호화해서 저장해요. 눈 모양을 누르면 저장된 값을 볼 수 있어요.</p></div>
+      <div class="t-acts"><button class="btn" type="button" id="back">목록</button></div></div>
+
+    <section class="t-card t-pad fill" id="fCard">
+      <div class="t-grid">
+        <label class="fld">타입<select class="input" id="type"><option value="ssh">SSH</option><option value="git">Git</option><option value="jenkins">Jenkins</option></select></label>
+        <label class="fld">이름<input class="input" id="name" placeholder="예: 운영서버 SFTP" autocomplete="off"></label>
+        <label class="fld wide2">설명 (선택)<input class="input" id="desc" placeholder="용도 등 메모" autocomplete="off"></label>
+      </div>
+
+      <div class="t-sect" data-t="ssh">
+        <div class="t-grid">
+          <label class="fld">Host<input class="input" id="host" placeholder="예: 192.168.0.10" autocomplete="off"></label>
+          <label class="fld">Port<input class="input" id="port" value="22" inputmode="numeric"></label>
+          <label class="fld">ID<input class="input" id="sshUser" placeholder="접속 계정" autocomplete="off"></label>
+          <div class="fld">인증 방식
+            <div class="t-seg inline" id="auth" role="tablist"><button type="button" role="tab" data-a="password" aria-selected="true">비밀번호</button><button type="button" role="tab" data-a="key" aria-selected="false">개인키</button></div></div>
+          <label class="fld wide2" id="pwBox">비밀번호<span class="pw"><input class="input" id="sshPw" type="password" placeholder="비밀번호" autocomplete="off"><button class="btn eye" type="button" data-eye="sshPw" aria-label="보기" title="보기"></button></span></label>
+          <label class="fld wide2" id="keyBox" hidden>개인키 파일 경로<input class="input" id="sshKey" placeholder="예: C:\Users\me\.ssh\id_rsa" autocomplete="off"></label>
+        </div>
+        <h3 class="t-h3">이 서버의 MySQL 계정<span>DB 관리에서 이 계정으로 원격 DB를 만들어요</span></h3>
+        <div class="t-grid">
+          <label class="fld">MySQL ID<input class="input" id="myUser" placeholder="root" autocomplete="off"></label>
+          <label class="fld">MySQL PW<span class="pw"><input class="input" id="myPw" type="password" placeholder="DB 생성에 사용해요" autocomplete="off"><button class="btn eye" type="button" data-eye="myPw" aria-label="보기" title="보기"></button></span></label>
+        </div>
+      </div>
+
+      <div class="t-sect" data-t="git" hidden>
+        <div class="t-grid">
+          <label class="fld">Provider<select class="input" id="provider"><option value="github">GitHub</option><option value="gitlab">GitLab</option></select></label>
+          <label class="fld">ID<input class="input" id="gitUser" placeholder="계정명" autocomplete="off"></label>
+          <label class="fld wide2">Personal Access Token<span class="pw"><input class="input" id="gitToken" type="password" placeholder="토큰" autocomplete="off"><button class="btn eye" type="button" data-eye="gitToken" aria-label="보기" title="보기"></button></span></label>
+        </div>
+      </div>
+
+      <div class="t-sect" data-t="jenkins" hidden>
+        <div class="t-grid">
+          <label class="fld wide2">URL<input class="input" id="jUrl" placeholder="예: https://jenkins.example.com" autocomplete="off"></label>
+          <label class="fld">ID<input class="input" id="jUser" placeholder="계정명" autocomplete="off"></label>
+          <label class="fld">API Token<span class="pw"><input class="input" id="jToken" type="password" placeholder="토큰" autocomplete="off"><button class="btn eye" type="button" data-eye="jToken" aria-label="보기" title="보기"></button></span></label>
+        </div>
+      </div>
+
+    </section>
+    <div class="notice" id="result" hidden></div>
+    <div class="t-bar">
+      <span class="dirty" id="dirty"></span>
+      <button class="btn" type="button" id="test">연결 테스트</button>
+      <button class="btn t-cta" type="button" id="save">저장</button>
+    </div>
+  </div>
+</main>
+
+<script src="app.js"></script>
+<script>
+/* 이 PC의 connections.json 과 연결된다. 목록에는 요약만 오고, 비밀값은 보기·복사를 눌렀을 때만 가져온다. */
+const LABEL = { ssh: "SSH", git: "Git", jenkins: "Jenkins" };
+const $ = id => document.getElementById(id);
+const SECRET_KEY = { sshPw: "ssh_credential", myPw: "mysql_password", gitToken: "git_token", jToken: "jenkins_token" }; // 입력칸 → 저장 필드
+let CONNS = [], filter = "all", editId = null, auth = "password", hasSecret = {}, busy = false;
+
+initSecretButtons(id => editId && hasSecret[SECRET_KEY[id]] ? api.conn.reveal(editId, SECRET_KEY[id]) : ""); // 저장된 연결을 고치는 중일 때만 가져온다
+
+function drawList() {
+  for (const k of ["all", "ssh", "git", "jenkins"]) $("n-" + k).textContent = k === "all" ? CONNS.length : CONNS.filter(c => c.type === k).length;
+  document.querySelectorAll("#filters [role=tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.f === filter)));
+  const rows = CONNS.filter(c => filter === "all" || c.type === filter);
+  if (!rows.length) { $("list").innerHTML = `<div class="t-empty">등록된 연결이 없어요.<br>오른쪽 위의 ‘연결 추가’로 시작해 보세요.</div>`; return; }
+  $("list").innerHTML = `<div class="t-list"><div class="t-conn th"><span>이름</span><span>마지막 사용</span><span></span></div>` + rows.map(c => `
+    <div class="t-conn" data-id="${esc(c.id)}"><div><div class="t-name"><span class="ty ${c.type}">${LABEL[c.type]}</span><span>${esc(c.name)}</span></div>
+      <div class="t-sub num">${esc(c.summary)}${c.description ? ` · ${esc(c.description)}` : ""}</div></div>
+      <span class="${c.lastUsedAt ? "num" : "muted"}">${c.lastUsedAt || "사용 이력 없음"}</span>
+      <span class="t-acts"><button class="t-go" type="button" data-act="test">연결테스트</button><button class="t-go" type="button" data-act="edit">수정</button><button class="t-go del" type="button" data-act="del">삭제</button></span></div>`).join("") + "</div>";
+}
+async function reload() { try { CONNS = await api.conn.list(); } catch (e) { toast(e.message); } drawList(); }
+
+const show = v => { $("vList").hidden = v !== "list"; $("vForm").hidden = v !== "form"; };
+const pickType = t => { $("type").value = t; document.querySelectorAll(".t-sect").forEach(s => s.hidden = s.dataset.t !== t); $("test").textContent = t === "ssh" ? "DB 연결테스트" : "연결 테스트"; };
+function pickAuth(a) { auth = a; document.querySelectorAll("#auth [role=tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.a === a))); $("pwBox").hidden = a !== "password"; $("keyBox").hidden = a !== "key"; }
+
+/** 비밀값 입력칸: 저장된 값이 있으면 안내를 바꾸고 보기·복사 버튼이 저장된 값을 가져온다. */
+function markSecrets() {
+  for (const [id, key] of Object.entries(SECRET_KEY)) $(id).placeholder = hasSecret[key] ? "저장된 값이 있어요 (바꿀 때만 입력)" : "입력";
+}
+
+async function openForm(id) {
+  let c = null;
+  if (id) { try { c = await api.conn.get(id); } catch (e) { return toast(e.message); } }
+  editId = id || null; hasSecret = c ? c.hasSecret : {};
+  $("fTitle").textContent = c ? "연결 수정" : "연결 추가";
+  document.querySelectorAll("#fCard input").forEach(i => { if (i.id !== "port") i.value = ""; });
+  document.querySelectorAll("#fCard .pw input").forEach(i => { i.type = "password"; });
+  document.querySelectorAll("[data-eye]").forEach(b => { b.innerHTML = EYE; b.title = b.ariaLabel = "보기"; });
+  $("port").value = "22"; $("result").hidden = true;
+  pickType(c ? c.type : "ssh"); $("type").disabled = !!c; pickAuth("password");
+  if (c) {
+    const f = c.fields;
+    $("name").value = c.name; $("desc").value = c.description;
+    if (c.type === "ssh") { $("host").value = f.host; $("port").value = f.port || "22"; $("sshUser").value = f.ssh_user; $("myUser").value = f.mysql_user; pickAuth(f.auth_method === "key" ? "key" : "password"); if (f.auth_method === "key") $("sshKey").value = f.ssh_credential; }
+    if (c.type === "git") { $("provider").value = f.provider; $("gitUser").value = f.git_username; }
+    if (c.type === "jenkins") { $("jUrl").value = f.url; $("jUser").value = f.jenkins_user; }
+  }
+  markSecrets();
+  $("dirty").textContent = c ? "비밀번호·토큰은 비워 두면 저장된 값을 그대로 써요" : "";
+  show("form"); $("name").focus();
+}
+
+/** 폼의 입력값을 서버에 보내는 형태로 모은다. */
+function collect() {
+  const t = $("type").value, v = id => $(id).value;
+  const fields = t === "ssh" ? { host: v("host"), port: v("port"), ssh_user: v("sshUser"), auth_method: auth, ssh_credential: auth === "key" ? v("sshKey") : v("sshPw"), mysql_user: v("myUser"), mysql_password: v("myPw") }
+    : t === "git" ? { provider: v("provider"), git_username: v("gitUser"), git_token: v("gitToken") }
+    : { url: v("jUrl"), jenkins_user: v("jUser"), jenkins_token: v("jToken") };
+  return { id: editId, type: t, name: v("name"), description: v("desc"), fields };
+}
+
+/** 오래 걸리는 작업 동안 버튼을 잠근다. */
+async function working(btn, label, fn) {
+  if (busy) return;
+  busy = true; btn.disabled = true; const text = btn.textContent; btn.textContent = label;
+  try { return await fn(); } finally { busy = false; btn.disabled = false; btn.textContent = text; }
+}
+
+$("list").addEventListener("click", async e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const id = b.closest("[data-id]").dataset.id, c = CONNS.find(x => x.id === id);
+  if (b.dataset.act === "edit") return openForm(id);
+  if (b.dataset.act === "test") {
+    return working(b, "테스트 중…", async () => {
+      try { const r = await api.conn.testSaved(id); toast(`‘${c.name}’: ${r.message}`); } catch (err) { toast(err.message); }
+      await reload();
+    });
+  }
+  if (await confirmDialog({ title: `‘${c.name}’을 삭제할까요?`, desc: "저장된 비밀번호·토큰도 함께 지워지고 되돌릴 수 없어요. 이 연결을 쓰는 DB·IDE 설정에서는 연결이 풀려요.", confirmLabel: "삭제", danger: true })) {
+    try { await api.conn.remove(id); } catch (err) { return toast(err.message); }
+    toast("삭제했어요"); await reload();
+  }
+});
+$("filters").addEventListener("click", e => { const b = e.target.closest("[role=tab]"); if (b) { filter = b.dataset.f; drawList(); } });
+$("add").addEventListener("click", () => openForm(null));
+$("back").addEventListener("click", () => show("list"));
+$("type").addEventListener("change", e => pickType(e.target.value));
+$("auth").addEventListener("click", e => { const b = e.target.closest("[data-a]"); if (b) pickAuth(b.dataset.a); });
+$("test").addEventListener("click", () => working($("test"), "테스트 중…", async () => {
+  const r = $("result"); r.hidden = false; r.className = "notice"; r.textContent = "연결하는 중이에요…";
+  try { const { id, type, fields } = collect(), res = await api.conn.test({ id, type, fields }); r.className = "notice" + (res.ok ? "" : " neg"); r.textContent = res.message; }
+  catch (err) { r.className = "notice neg"; r.textContent = err.message; }
+}));
+$("save").addEventListener("click", () => working($("save"), "저장 중…", async () => {
+  try { await api.conn.save(collect()); } catch (err) { return toast(err.message); }
+  filter = "all"; await reload(); show("list"); toast("저장했어요");
+}));
+reload();
+</script>
+</body>
+</html>

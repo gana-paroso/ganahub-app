@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IDE 관리 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="ide">
+<aside class="app-side" id="side"></aside>
+<main class="app-main t-main sp" id="v" aria-live="polite"></main>
+
+<script src="app.js"></script>
+<script>
+/* IDE 프로젝트(이 PC), 연동 프로젝트의 공통 메모(공유폴더), Git(내 PC의 저장소), Jenkins(연결 관리의 연결)를 한 화면에서 다룬다. */
+const $ = id => document.getElementById(id);
+const TY = { eclipse: "Eclipse", vscode: "VS Code" };
+let P = [], OPT = { ides: [], linkable: [], linkError: "", git: [], jenkins: [] }, loaded = false, loadErr = "";
+let view = "list", cur = null, dtab = "info", btab = "git", gtab = "pull", term = "", pmEdit = false, F = null, bdtab = "log", busy = "";
+let G = null /* Git: { s: 요약, f: 원격 확인 결과, checked: Set(경로), tag, msg, text, tagText } */, J = null /* Jenkins: { builds, sel, detail, loading, error } */, COMMON = {} /* 연동 프로젝트별 공통 메모 */;
+const proj = () => P.find(p => p.id === cur);
+const nameOf = (arr, id) => (!id ? "" : (arr.find(x => x.id === id) || {}).name || "(삭제된 연결)");
+const tyb = t => `<span class="ty ide-${t}">${TY[t]}</span>`;
+const memoHtml = t => t.split("\n").map(l => { const h = l.match(/^(#{1,2}) (.*\S.*)$/); return h ? `<h${h[1].length + 2}>${esc(h[2].trim())}</h${h[1].length + 2}>` : /^\s*-{3,}\s*$/.test(l) ? "<hr>" : `<div class="ln">${esc(l)}</div>`; }).join("");
+const hd = (title, lead, extra) => `<div class="t-top"><div><h1>${title}${extra || ""}</h1><p class="t-lead">${lead}</p></div></div>`;
+const seg = (id, items, cur) => `<div class="t-seg" id="${id}" role="tablist">${items.map(([k, l]) => `<button type="button" role="tab" data-k="${k}" aria-selected="${k === cur}">${l}</button>`).join("")}</div>`;
+const kv = (k, v, extra) => `<div class="kv-row"><span class="k">${k}</span><span class="v">${v || '<span class="muted">—</span>'}</span>${extra || "<span></span>"}</div>`;
+const when = ms => { const d = new Date(ms), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+const span = ms => `${Math.floor(ms / 60000)}분 ${Math.floor(ms / 1000) % 60}초`;
+const fsCls = st => (st === "??" || st === "A" ? "A" : st === "D" ? "D" : "M");
+const fsLabel = { A: "신규", D: "삭제", M: "수정" };
+const fail = e => toast(e.message || String(e));
+
+/* ───── 목록 ───── */
+function vList() {
+  if (!loaded) return hd("IDE 관리", "내 PC의 IDE 프로젝트를 등록해 두고 바로 실행하거나 빌드·배포해요.") + (loadErr ? `<section class="t-card"><div class="t-empty">${esc(loadErr)}<br><button class="btn" type="button" data-a="reload">다시 시도</button></div></section>` : `<section class="t-card"><div class="loading" role="status" style="padding:16px 20px"><div class="bar"><i></i></div></div></section>`);
+  const t = term.toLowerCase(), rows = P.filter(p => !t || p.name.toLowerCase().includes(t));
+  return hd("IDE 관리", "내 PC의 IDE 프로젝트를 등록해 두고 바로 실행하거나 빌드·배포해요.") + `
+  <form class="t-search wide" id="sf" role="search"><div class="search-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input class="input" id="q" type="search" value="${esc(term)}" placeholder="IDE 프로젝트명으로 찾기" aria-label="IDE 프로젝트 검색" autocomplete="off"></div>
+    <button class="btn t-cta" type="submit">검색</button>${term ? '<button class="btn" type="button" data-a="reset">초기화</button>' : ""}
+    <div class="t-acts"><button class="btn t-cta" type="button" data-a="add">+ IDE 프로젝트 등록</button></div></form>
+  <section class="t-card"><div class="t-head">등록된 프로젝트<span class="num">${rows.length}개</span></div><div class="t-list">` + (rows.length ? rows.map(p => `
+    <div class="t-ide" data-id="${esc(p.id)}"><div>${tyb(p.type)}</div><div><div class="t-name"><a href="#" data-a="detail">${esc(p.name)}</a></div><div class="t-sub">${p.linked ? `연동 프로젝트 · ${esc(p.linked)}` : "연동 프로젝트 없음"}</div></div>
+      <span class="t-acts"><button class="t-go" type="button" data-a="detail">상세보기</button><button class="t-go run" type="button" data-a="run">실행</button><button class="t-go" type="button" data-a="build">빌드&amp;배포</button><button class="t-go" type="button" data-a="edit">수정</button><button class="t-go del" type="button" data-a="del">삭제</button></span></div>`).join("")
+    : `<div class="t-empty">${term ? "검색 결과가 없어요." : "등록된 IDE 프로젝트가 없어요."}<br>${term ? "" : "오른쪽 위의 ‘IDE 프로젝트 등록’으로 시작해 보세요."}</div>`) + `</div></section>`;
+}
+
+/* ───── 상세 ───── */
+/** 연동 프로젝트의 공통 메모(공유폴더 config.json)를 한 번만 불러온다. */
+function loadCommon(name) {
+  if (!name || COMMON[name]) return;
+  COMMON[name] = { loading: true };
+  api.projects.detail(name).then(d => { COMMON[name] = { memo: d.memo, at: d.memoUpdatedAt }; }).catch(e => { COMMON[name] = { error: e.message }; }).finally(() => { if (view === "detail" && dtab === "common") draw(true); });
+}
+function vDetail() {
+  const p = proj();
+  let body;
+  if (dtab === "info") body = `<div class="t-pad"><div class="t-head">기본 정보</div><div class="kv t-kv">${kv("IDE 유형", tyb(p.type))}${kv("IDE 실행 파일", esc(p.exe))}
+    ${kv("로컬 저장소 경로", `<span class="num">${esc(p.local)}</span>`, `<button class="t-go" type="button" data-a="openpath">디렉토리 열기</button>`)}${p.type === "eclipse" ? kv("Workspace 경로", `<span class="num">${esc(p.ws)}</span>`) : ""}
+    ${kv("Git 저장소 URL", esc(p.gitUrl))}${kv("Git 계정", esc(nameOf(OPT.git, p.gitConn)))}${kv("Jenkins 연결", esc(nameOf(OPT.jenkins, p.jen)))}${kv("Jenkins Job명", esc(p.job))}</div></div>`;
+  else if (dtab === "common") {
+    loadCommon(p.linked);
+    const c = COMMON[p.linked] || {};
+    body = `<div class="t-pad"><div class="t-head">공통 메모${p.linked ? `<span>${esc(p.linked)} 기준</span>` : ""}</div>` + (!p.linked ? `<div class="t-empty">연동 프로젝트가 없어서 공통 메모가 없어요.</div>`
+      : c.loading ? `<div class="t-empty">공통 메모를 불러오는 중이에요…</div>`
+      : c.error ? `<div class="t-empty">${esc(c.error)}</div>` : c.memo.trim() ? `<div class="memo">${memoHtml(c.memo)}</div>` : `<div class="t-empty">작성된 공통 메모가 없어요.</div>`)
+      + (p.linked ? `<div class="t-acts end"><button class="btn" type="button" data-a="gocommon">프로젝트 관리에서 수정</button></div>` : "") + `</div>`;
+  } else body = `<div class="t-pad"><div class="t-head">개인 메모<span>이 PC, 이 개발자 전용이에요</span>${pmEdit ? "" : '<button class="btn btn-sm" type="button" data-a="pmedit">수정</button>'}</div>` + (pmEdit
+    ? `<p class="t-sub" style="margin:0 0 12px"><code># 큰 제목</code> <code>## 작은 제목</code> <code>---</code> 구분선 · 저장하면 적용돼요.</p><textarea class="textarea memo-edit" id="pm" placeholder="이 PC, 이 개발자 전용 메모">${esc(p.memo)}</textarea>`
+    : p.memo.trim() ? `<div class="memo">${memoHtml(p.memo)}</div>` : `<div class="t-empty">작성된 메모가 없어요.<br><button class="btn btn-sm" type="button" data-a="pmedit">메모 작성</button></div>`) + `</div>`;
+  return hd(esc(p.name), "등록한 IDE 프로젝트의 설정이에요.", ` ${tyb(p.type)}`) + `<div class="t-row-ctl">${seg("dt", [["info", "기본정보"], ["common", "공통 메모"], ["personal", "개인 메모"]], dtab)}
+    <div class="t-acts"><button class="btn" type="button" data-a="list">목록</button><button class="btn" type="button" data-a="edit">수정</button><button class="btn" type="button" data-a="build">빌드 &amp; 배포</button><button class="btn t-cta" type="button" data-a="run">실행</button></div></div>
+    <section class="t-card">${body}</section>` + (pmEdit ? `<div class="t-bar"><span class="dirty">수정하는 중이에요</span><button class="btn" type="button" data-a="pmcancel">취소</button><button class="btn t-cta" type="button" data-a="pmsave">저장</button></div>` : "");
+}
+
+/* ───── 등록·수정 ───── */
+/** 유형에 맞는 IDE 이름 목록. 하나도 없으면 전부 보여 주고, 지금 값이 목록에 없어도 남겨 둔다. */
+function exeNames(type, current) {
+  let names = OPT.ides.filter(i => i.kind === type).map(i => i.name);
+  if (!names.length) names = OPT.ides.map(i => i.name);
+  if (current && !names.includes(current)) names = [current, ...names];
+  return names;
+}
+function vForm() {
+  const f = F;
+  const optN = (arr, v, none) => (none ? `<option value="">${none}</option>` : "") + (v && !arr.includes(v) ? [v, ...arr] : arr).map(x => `<option${x === v ? " selected" : ""}>${esc(x)}</option>`).join("");
+  const optI = (arr, v, none) => `<option value="">${none}</option>` + (v && !arr.some(x => x.id === v) ? `<option value="${esc(v)}" selected>(삭제된 연결)</option>` : "") + arr.map(x => `<option value="${esc(x.id)}"${x.id === v ? " selected" : ""}>${esc(x.name)}</option>`).join("");
+  const exes = exeNames(f.type, f.exe);
+  return hd(f.id ? "IDE 프로젝트 수정" : "IDE 프로젝트 등록", "연동 프로젝트와 Git·Jenkins를 연결해 두면 빌드·배포가 편해요.") + `
+  <div class="t-row-ctl"><span></span><div class="t-acts"><button class="btn" type="button" data-a="${f.id ? "detail" : "list"}">${f.id ? "상세화면" : "목록"}</button></div></div>
+  <section class="t-card t-pad"><div class="t-head">기본 정보</div><div class="t-grid">
+    <label class="fld wide2">IDE 프로젝트명 *<input class="input" data-f="name" value="${esc(f.name)}" placeholder="예: A시청 계약관리 모듈" autocomplete="off"></label>
+    <label class="fld wide2">연동 프로젝트<select class="input" data-f="linked">${optN(OPT.linkable, f.linked, "선택 안 함")}</select>${OPT.linkError ? `<em class="hint">공유폴더를 읽지 못해 목록이 비어 있어요: ${esc(OPT.linkError)}</em>` : ""}</label>
+    <div class="fld wide2">IDE 유형 *<div class="t-seg inline" id="ft">${["eclipse", "vscode"].map(k => `<button type="button" data-k="${k}" aria-selected="${f.type === k}">${TY[k]}</button>`).join("")}</div></div>
+    <label class="fld wide2">IDE 실행 파일 *<select class="input" data-f="exe">${exes.length ? optN(exes, f.exe) : '<option value="">(전역 설정에서 IDE를 먼저 등록해 주세요)</option>'}</select><em class="hint">전역 설정 &gt; IDE 설정에 등록한 IDE 이름 중에서 골라요</em></label>
+    <label class="fld wide2">로컬 저장소 경로 *<span class="pw"><input class="input" data-f="local" value="${esc(f.local)}" placeholder="D:\\workspace\\my-project" autocomplete="off"><button class="btn" type="button" data-a="browse" data-t="local">찾아보기</button></span></label>
+    ${f.type === "eclipse" ? `<div class="fld wide2"><label for="ws">Workspace 경로 * <em class="hint">IDE 실행 시 사용하는 경로</em></label><span class="pw"><input class="input" id="ws" data-f="ws" value="${esc(f.ws)}" placeholder="D:\\workspace\\my-project" autocomplete="off"${f.same ? " disabled" : ""}><button class="btn" type="button" data-a="browse" data-t="ws"${f.same ? " disabled" : ""}>찾아보기</button></span>
+      <label class="chk"><input type="checkbox" id="same"${f.same ? " checked" : ""}>소스저장소와 동일</label></div>` : ""}
+  </div>
+  <h3 class="t-h3">연동 정보</h3>
+  <div class="grp"><div class="grp-h"><span class="ty git">Git</span>소스 저장소</div><div class="t-grid">
+    <label class="fld">Git 저장소 URL<input class="input" data-f="gitUrl" value="${esc(f.gitUrl)}" placeholder="https://github.com/org/repo.git" autocomplete="off"></label>
+    <label class="fld">Git 계정<select class="input" data-f="gitConn">${optI(OPT.git, f.gitConn, "미연결")}</select></label></div></div>
+  <div class="grp"><div class="grp-h"><span class="ty jenkins">Jenkins</span>빌드·배포</div><div class="t-grid">
+    <label class="fld">Jenkins 연결<select class="input" data-f="jen">${optI(OPT.jenkins, f.jen, "미연결")}</select></label>
+    <label class="fld">Jenkins Job명<input class="input" data-f="job" value="${esc(f.job)}" placeholder="sample-contract-deploy" autocomplete="off"></label></div></div>
+  </section>
+  <div class="t-bar"><span class="dirty"></span><button class="btn" type="button" data-a="${f.id ? "detail" : "list"}">취소</button><button class="btn t-cta" type="button" data-a="save">저장</button></div>`;
+}
+
+/* ───── 빌드 & 배포 ───── */
+function gitPanel(p) {
+  if (!p.gitUrl) return `<section class="t-card"><div class="t-empty">Git 저장소 정보가 등록되어 있지 않아요.<br>수정에서 Git 저장소 URL을 등록해 주세요.<br><button class="btn" type="button" data-a="edit">수정으로 이동</button></div></section>`;
+  if (!G || G.loading) return `<section class="t-card"><div class="loading" role="status" style="padding:16px 20px"><div class="bar"><i></i></div><p class="field-msg" style="margin-top:12px">저장소 정보를 읽고 있어요…</p></div></section>`;
+  if (G.error) return `<section class="t-card"><div class="t-empty">${esc(G.error)}<br><button class="btn" type="button" data-a="greload">다시 읽기</button> <button class="btn" type="button" data-a="edit">수정으로 이동</button></div></section>`;
+  const s = G.s, f = G.f, repo = p.gitUrl.split("/").pop().replace(/\.git$/, "");
+  const behind = f && f.ok ? f.behind : s.behind, incoming = f && f.ok ? f.incoming : [], files = s.changedFiles, sel = files.filter(x => G.checked.has(x.path));
+  const sync = !s.upstream ? "원격 추적 브랜치가 없어요" : f && f.ok ? (behind ? `원격보다 ${behind}개 뒤처짐` : "최신 상태") : `${behind ? `원격보다 ${behind}개 뒤처짐` : "최신 상태"} (마지막 확인 기준)`;
+  const info = `<section class="t-card t-pad"><div class="t-head"><span class="repo">${esc(repo)}<span class="ty git">${esc(nameOf(OPT.git, p.gitConn) || "Git")}</span></span><span class="t-acts"><button class="btn btn-sm" type="button" data-a="copy">URL 복사</button><button class="btn btn-sm" type="button" data-a="check">원격 변경사항 확인</button></span></div>
+    <div class="t-sub num" style="margin:0 0 14px">${esc(p.gitUrl)}</div>
+    <div class="repo-grid"><div><span>현재 브랜치</span><b class="num">${esc(s.branch)}</b></div><div><span>원격 동기화</span><b>${esc(sync)}</b></div><div><span>작업 트리</span><b>${s.uncommitted ? `변경 ${s.uncommitted}개` : "깨끗함"}</b></div><div><span>마지막 커밋</span><b class="num">${s.lastCommit ? `${esc(s.lastCommit.hash)} · ${esc(s.lastCommit.when.slice(5, 10))}` : "—"}</b></div></div></section>`;
+  const note = G.msg ? `<div class="notice${G.msg.ok ? "" : " neg"}" style="margin:0 0 14px;white-space:pre-wrap">${esc(G.msg.text)}</div>` : "";
+  const pull = `${note}<div class="t-acts" style="margin-bottom:14px">${behind ? '<button class="btn t-cta" type="button" data-a="pull">Pull 실행</button>' : ""}<span class="t-sub" style="align-self:center">upstream: ${esc(s.upstream || "없음")}</span></div>
+    ${f && !f.ok ? `<div class="notice neg" style="white-space:pre-wrap">${esc(f.error)}</div>`
+    : incoming.length ? `<div class="commits"><div class="t-head">받아올 커밋 <span class="num">${incoming.length}개</span></div>${incoming.map(c => `<div class="cm"><b class="num">${esc(c.hash)}</b><span>${esc(c.message)}</span><em>${esc(c.author)} · ${esc(c.when)}</em></div>`).join("")}</div>`
+    : behind ? `<div class="notice"><span><b>받아올 커밋이 ${behind}개 있어요</b> Pull 실행으로 받아올 수 있어요.</span></div>`
+    : f ? `<div class="notice"><span><b>이미 최신이에요</b> 받아올 커밋이 없어요.</span></div>` : `<div class="notice"><span>‘원격 변경사항 확인’을 누르면 원격의 최신 상태를 확인해요.</span></div>`}`;
+  const tagHint = G.tag && G.tag.ok ? `최근 태그 ${esc(G.tag.latest)}` : "";
+  const push = `${note}<div class="pushhead"><label class="chk"><input type="checkbox" id="all"${sel.length === files.length && files.length ? " checked" : ""}> <span>전체 선택 <em class="num">${sel.length}/${files.length}</em></span></label></div>
+    <div class="commits files">${files.length ? files.map((x, i) => `<label class="cm"><input type="checkbox" data-fi="${i}"${G.checked.has(x.path) ? " checked" : ""}><span class="num">${esc(x.path)}</span><i class="fs ${fsCls(x.status)}">${fsLabel[fsCls(x.status)]}</i></label>`).join("") : '<div class="t-empty">변경된 파일이 없어요.</div>'}</div>
+    <div class="t-grid" style="margin-top:14px"><label class="fld">커밋 메시지<textarea class="textarea" id="cmsg" placeholder="예: CMS 관리자 화면 리디자인 반영" style="min-height:84px">${esc(G.text)}</textarea></label>
+      <div class="fld"><label for="tag">Tag (선택) <em class="hint">${tagHint}</em></label><input class="input" id="tag" value="${esc(G.tagText)}" placeholder="${G.tag && G.tag.ok ? `예: ${esc(G.tag.suggestions.patch)}` : "예: v1.0.1"}" autocomplete="off">${G.tag && G.tag.ok ? `<span class="t-acts">${["patch", "minor"].map(k => `<button class="t-go" type="button" data-tag="${esc(G.tag.suggestions[k])}">${esc(G.tag.suggestions[k])}</button>`).join("")}</span>` : ""}</div></div>
+    <div class="t-acts end" style="margin-top:14px"><button class="btn t-cta" type="button" data-a="push">Commit &amp; Push</button></div>`;
+  return info + `<section class="t-card t-pad">${seg("gt", [["pull", `Pull${behind ? ` <i class="bdg">${behind}</i>` : ""}`], ["push", `Commit &amp; Push${files.length ? ` <i class="bdg">${files.length}</i>` : ""}`]], gtab)}<div style="height:16px"></div>${gtab === "pull" ? pull : push}</section>`;
+}
+const editCls = t => ({ add: "A", delete: "D" }[t] || "M");
+const editLabel = t => ({ add: "신규", edit: "수정", delete: "삭제" }[t] || t);
+/**
+ * 변경된 파일을 폴더 트리로 보여 준다. 경로가 같은 파일끼리 묶고, 하위 폴더가 하나뿐인 폴더는 한 줄로 합쳐서(예: src/main/java/kr/example)
+ * 패키지 경로가 깊어도 한눈에 보이게 한다. 폴더마다 파일 수를 표시하고, 위에는 변경 종류별 요약과 펼치기·접기 버튼을 둔다.
+ */
+function fileTree(files) {
+  const root = { dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.file.replace(/\\/g, "/").split("/").filter(Boolean), name = parts.pop() || f.file;
+    let n = root;
+    for (const dir of parts) { if (!n.dirs.has(dir)) n.dirs.set(dir, { dirs: new Map(), files: [] }); n = n.dirs.get(dir); }
+    n.files.push({ name, editType: f.editType });
+  }
+  const count = n => n.files.length + [...n.dirs.values()].reduce((a, d) => a + count(d), 0);
+  const byName = (a, b) => a.localeCompare(b, "ko");
+  const list = n => [...n.dirs].sort((a, b) => byName(a[0], b[0])).map(([name, d]) => {
+    let label = name;
+    while (!d.files.length && d.dirs.size === 1) { const [k, c] = [...d.dirs][0]; label += "/" + k; d = c; } // 폴더가 하나뿐이면 합친다
+    return `<details class="tf" open><summary><span class="tn">${icon("folder")}${esc(label)}</span><em class="num">${count(d)}</em></summary><div class="tc">${list(d)}</div></details>`;
+  }).join("") + n.files.sort((a, b) => byName(a.name, b.name)).map(f => `<div class="tf-file">${icon("file")}<span>${esc(f.name)}</span><i class="fs ${editCls(f.editType)}">${esc(editLabel(f.editType))}</i></div>`).join("");
+  const sum = ["add", "edit", "delete"].map(t => [t, files.filter(f => f.editType === t).length]).filter(x => x[1]).map(([t, n]) => `${editLabel(t)} ${n}`).join(" · ");
+  return `<div class="tree-bar"><span>파일 ${files.length}개${sum ? ` · ${sum}` : ""}</span><span class="t-acts"><button class="btn btn-sm" type="button" data-a="texp">모두 펼치기</button><button class="btn btn-sm" type="button" data-a="tcol">모두 접기</button></span></div><div class="ftree">${list(root)}</div>`;
+}
+function jenPanel(p) {
+  if (!p.jen || !p.job) return `<section class="t-card"><div class="t-empty">Jenkins 연결 정보가 등록되어 있지 않아요.<br>수정에서 Jenkins 연결과 Job명을 등록해 주세요.<br><button class="btn" type="button" data-a="edit">수정으로 이동</button></div></section>`;
+  if (!J || J.loading) return `<section class="t-card"><div class="loading" role="status" style="padding:16px 20px"><div class="bar"><i></i></div><p class="field-msg" style="margin-top:12px">빌드 이력을 불러오고 있어요…</p></div></section>`;
+  if (J.error) return `<section class="t-card"><div class="t-empty">${esc(J.error)}<br><button class="btn" type="button" data-a="jreload">다시 시도</button></div></section>`;
+  const url = (OPT.jenkins.find(x => x.id === p.jen) || {}).url || "", b = J.builds.find(x => x.number === J.sel), d = J.detail;
+  const cls = x => (x.building ? "M" : x.result === "SUCCESS" ? "A" : x.result === "FAILURE" ? "D" : "M");
+  return `<section class="t-card t-pad"><div class="t-head"><span class="repo">${esc(p.job)}<span class="ty jenkins">Jenkins Job</span></span><span class="t-acts"><button class="btn" type="button" data-a="jreload">새로고침</button><button class="btn t-cta" type="button" data-a="jbuild">지금 빌드하기</button></span></div>
+    <div class="t-sub num">${esc(url.replace(/\/+$/, ""))}/job/${esc(p.job)}</div></section>
+  <section class="t-card jen"><div class="jl"><div class="t-head">빌드 이력<span>최근 ${J.builds.length}회</span></div>${J.builds.length ? J.builds.map(x => `<button type="button" class="jb${x.number === J.sel ? " on" : ""}" data-b="${x.number}"><b class="num">#${x.number}</b><i class="fs ${cls(x)}">${esc(x.resultLabel)}</i><span class="t-sub num">${when(x.timestamp)}</span></button>`).join("") : '<div class="t-empty">빌드 이력이 없어요.</div>'}</div>
+    <div class="jd">${b ? `<div class="t-row-ctl" style="margin:0 0 12px">${seg("bd", [["log", "Console Output"], ["files", "변경된 파일"]], bdtab)}<span class="t-sub num">#${b.number} · ${span(b.duration)}${b.cause ? ` · ${esc(b.cause)}` : ""}</span></div>`
+      + (!d || d.loading ? `<div class="t-empty">불러오는 중이에요…</div>` : d.error ? `<div class="t-empty">${esc(d.error)}</div>`
+        : bdtab === "log" ? `<pre class="log">${esc(d.log)}</pre>` : d.changedFiles.length ? fileTree(d.changedFiles) : `<div class="t-empty">변경된 파일 정보가 없어요.</div>`)
+      : `<div class="t-empty">왼쪽 빌드를 누르면 로그와 변경된 파일을 볼 수 있어요.</div>`}</div></section>`;
+}
+function vBuild() {
+  const p = proj();
+  return hd("빌드 &amp; 배포", "Git으로 소스를 맞추고 Jenkins로 빌드해요.", ` <span class="ty ide-${p.type}">${esc(p.name)}</span>`) + `<div class="t-row-ctl">${seg("bt", [["git", "Git"], ["jenkins", "Jenkins"]], btab)}
+    <div class="t-acts"><button class="btn" type="button" data-a="detail">상세화면</button><button class="btn" type="button" data-a="list">목록</button></div></div>` + (btab === "git" ? gitPanel(p) : jenPanel(p)) + (busy ? `<div class="t-bar"><span class="dirty">${esc(busy)}</span></div>` : "");
+}
+
+/* ───── Git · Jenkins 불러오기와 실행 ───── */
+async function loadGit() {
+  const p = proj(); if (!p || !p.gitUrl) return;
+  const id = p.id; G = { loading: true }; draw();
+  try {
+    const s = await api.git.summary(id);
+    if (cur !== id) return;
+    G = s.ok ? { s, f: null, checked: new Set(s.changedFiles.map(x => x.path)), tag: null, msg: null, text: "", tagText: "" } : { error: s.error };
+  } catch (e) { if (cur !== id) return; G = { error: e.message }; }
+  draw(true);
+}
+async function loadTag() {
+  const id = cur; if (!G || !G.s || G.tag) return;
+  try { const t = await api.git.tag(id); if (cur === id && G) { G.tag = t.ok ? t : { ok: false }; draw(true); } } catch { if (G) G.tag = { ok: false }; }
+}
+/** Git 작업 하나를 실행한다. 실행하는 동안 화면을 잠그고, 끝나면 저장소 정보를 다시 읽는다. */
+async function gitDo(label, fn) {
+  if (busy) return;
+  busy = label; draw(true);
+  try { return await fn(); } catch (e) { G.msg = { ok: false, text: e.message }; }
+  finally {
+    busy = "";
+    try { const s = await api.git.summary(cur); if (s.ok) { G.s = s; const keep = new Set(s.changedFiles.map(x => x.path)); G.checked = new Set([...G.checked].filter(x => keep.has(x))); } } catch { /* 요약을 못 읽어도 결과 메시지는 보여 준다 */ }
+    draw(true);
+  }
+}
+async function loadJen(quiet) {
+  const id = cur; if (!quiet) { J = { loading: true }; draw(); }
+  try { const builds = await api.jen.builds(id); if (cur !== id) return; J = { builds, sel: J && J.sel, detail: J && J.detail }; }
+  catch (e) { if (cur !== id) return; if (!quiet || !J || !J.builds) J = { error: e.message }; else toast(e.message); }
+  draw(true);
+}
+async function pickBuild(n) {
+  const id = cur; J.sel = n; J.detail = { loading: true }; draw(true);
+  try { const d = await api.jen.detail(id, n); if (cur === id && J && J.sel === n) J.detail = d; } catch (e) { if (J && J.sel === n) J.detail = { error: e.message }; }
+  draw(true);
+}
+
+/* ───── 그리기·이벤트 ───── */
+function draw(keepScroll) {
+  const top = $("v").scrollTop;
+  $("v").innerHTML = { list: vList, detail: vDetail, form: vForm, build: vBuild }[view]();
+  $("v").scrollTop = keepScroll ? top : 0;
+  if (busy) document.querySelectorAll("#v button").forEach(b => { b.disabled = true; }); // 작업 중에는 모든 버튼을 잠근다
+}
+function go(v, o = {}) { view = v; if ("dtab" in o) dtab = o.dtab; if ("pmEdit" in o) pmEdit = o.pmEdit; if ("btab" in o) btab = o.btab; if ("gtab" in o) gtab = o.gtab; draw(); }
+const blank = () => { const k = OPT.ides.filter(i => i.kind === "eclipse")[0] || OPT.ides[0]; return { id: "", name: "", type: "eclipse", linked: "", exe: k ? k.name : "", local: "", ws: "", same: false, gitUrl: "", gitConn: "", jen: "", job: "" }; };
+async function reload() {
+  try { [P, OPT] = await Promise.all([api.ide.list(), api.ide.options()]); loaded = true; loadErr = ""; } catch (e) { loadErr = e.message; }
+  draw();
+}
+
+$("v").addEventListener("submit", e => { e.preventDefault(); term = $("q").value.trim(); draw(); });
+$("v").addEventListener("input", e => {
+  const t = e.target;
+  if (t.dataset.f) { F[t.dataset.f] = t.value; if (t.dataset.f === "local" && F.same) F.ws = t.value; }
+  if (t.id === "cmsg") G.text = t.value;
+  if (t.id === "tag") G.tagText = t.value;
+});
+$("v").addEventListener("change", e => {
+  const t = e.target;
+  if (["linked", "exe", "gitConn", "jen"].includes(t.dataset.f)) F[t.dataset.f] = t.value;
+  if (t.id === "same") { F.same = t.checked; if (t.checked) F.ws = F.local; draw(true); }
+  if (t.id === "all") { G.checked = t.checked ? new Set(G.s.changedFiles.map(x => x.path)) : new Set(); draw(true); }
+  if (t.dataset.fi !== undefined) { const path = G.s.changedFiles[+t.dataset.fi].path; t.checked ? G.checked.add(path) : G.checked.delete(path); draw(true); }
+});
+$("v").addEventListener("click", async e => {
+  const t = e.target, a = t.closest("[data-a]")?.dataset.a, row = t.closest("[data-id]");
+  if (a === "detail" && t.closest("a")) e.preventDefault();
+  if (row && ["detail", "run", "build", "edit", "del"].includes(a)) cur = row.dataset.id;
+  if (t.closest("#dt [data-k]")) { dtab = t.closest("[data-k]").dataset.k; pmEdit = false; return draw(); }
+  if (t.closest("#bt [data-k]")) { btab = t.closest("[data-k]").dataset.k; if (btab === "jenkins" && !J) loadJen(); return draw(); }
+  if (t.closest("#gt [data-k]")) { gtab = t.closest("[data-k]").dataset.k; if (gtab === "push") loadTag(); return draw(true); }
+  if (t.closest("#bd [data-k]")) { bdtab = t.closest("[data-k]").dataset.k; return draw(true); }
+  if (t.closest("#ft [data-k]")) { F.type = t.closest("[data-k]").dataset.k; F.exe = exeNames(F.type)[0] || ""; return draw(true); }
+  if (t.closest("[data-b]")) return pickBuild(+t.closest("[data-b]").dataset.b);
+  if (t.closest("[data-tag]")) { G.tagText = t.closest("[data-tag]").dataset.tag; return draw(true); }
+  try {
+    switch (a) {
+      case "reload": return reload();
+      case "texp": return document.querySelectorAll(".ftree details").forEach(d => { d.open = true; });
+      case "tcol": return document.querySelectorAll(".ftree details").forEach(d => { d.open = false; });
+      case "list": return go("list", { pmEdit: false });
+      case "add": F = blank(); return go("form");
+      case "reset": term = ""; return draw();
+      case "detail": return go("detail", { dtab: "info", pmEdit: false });
+      case "edit": F = { ...proj(), same: proj().ws === proj().local && !!proj().ws }; return go("form");
+      case "build": G = null; J = null; go("build", { btab: "git", gtab: "pull" }); return loadGit();
+      case "greload": return loadGit();
+      case "jreload": return loadJen(J && J.builds);
+      case "run": { const p = proj(); await api.ide.run(p.id); return toast(`${TY[p.type]}로 ‘${p.name}’을 실행해요`); }
+      case "del": {
+        const p = proj();
+        if (await confirmDialog({ title: `‘${p.name}’을 삭제할까요?`, desc: "이 PC의 등록 정보만 지워지고 소스 폴더는 그대로예요.", confirmLabel: "삭제", danger: true })) {
+          await api.ide.remove(p.id); await reload();
+          toast(`‘${p.name}’을 삭제했어요`, async () => { try { const id = await api.ide.save({ ...p, id: undefined }); await api.ide.memo(id, p.memo); await reload(); } catch (err) { fail(err); } });
+        }
+        return;
+      }
+      case "openpath": return api.ide.openPath(cur);
+      case "gocommon": location.href = "project-detail-toss.html?n=" + encodeURIComponent(proj().linked); return;
+      case "browse": { const key = t.closest("[data-t]").dataset.t, dir = await api.pickFolder(); if (dir) { F[key] = dir; if (key === "local" && F.same) F.ws = dir; draw(true); } return; }
+      case "pmedit": pmEdit = true; draw(true); return $("pm").focus();
+      case "pmcancel": pmEdit = false; return draw(true);
+      case "pmsave": {
+        const p = proj(), old = p.memo, text = $("pm").value;
+        await api.ide.memo(p.id, text); p.memo = text; pmEdit = false; draw(true);
+        return toast("저장했어요", async () => { try { await api.ide.memo(p.id, old); p.memo = old; draw(true); } catch (err) { fail(err); } });
+      }
+      case "save": {
+        if (!F.name.trim() || !F.local.trim() || !F.exe || (F.type === "eclipse" && !(F.same ? F.local : F.ws).trim())) return toast("필수 항목을 모두 입력해 주세요");
+        const id = await api.ide.save({ id: F.id || undefined, name: F.name, linked: F.linked, type: F.type, exe: F.exe, local: F.local, ws: F.type === "eclipse" ? (F.same ? F.local : F.ws) : "", gitUrl: F.gitUrl, gitConn: F.gitConn, jen: F.jen, job: F.job });
+        await reload(); cur = id; toast("저장했어요"); return go("detail", { dtab: "info" });
+      }
+      case "copy": await api.copy(proj().gitUrl); return toast("주소를 복사했어요");
+      case "check": return gitDo("원격 변경사항을 확인하는 중이에요…", async () => { G.msg = null; G.f = await api.git.check(cur); });
+      case "pull": return gitDo("Pull 하는 중이에요…", async () => { const r = await api.git.pull(cur); G.msg = { ok: r.ok, text: r.ok ? r.output || "Pull을 완료했어요" : r.error }; G.f = null; });
+      case "push": {
+        const paths = [...G.checked], tag = G.tagText.trim();
+        if (!paths.length && !tag) return toast("커밋할 파일을 선택하거나 태그를 입력해 주세요");
+        if (paths.length && !G.text.trim()) return toast("커밋 메시지를 입력해 주세요");
+        return gitDo("Commit & Push 하는 중이에요…", async () => {
+          const r = await api.git.push(cur, { message: G.text, tag, files: paths });
+          G.msg = { ok: r.ok, text: r.ok ? r.output : r.error };
+          if (r.ok) { G.text = ""; G.tagText = ""; G.tag = null; G.f = null; }
+        }).then(() => { if (G && G.msg && G.msg.ok) loadTag(); });
+      }
+      case "jbuild": { busy = "빌드를 요청하는 중이에요…"; draw(true); try { toast(await api.jen.build(cur)); setTimeout(() => { if (view === "build" && btab === "jenkins") loadJen(true); }, 2500); } finally { busy = ""; draw(true); } return; }
+    }
+  } catch (err) { busy = ""; fail(err); }
+});
+reload();
+</script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프로젝트 상세 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="projects">
+<aside class="app-side" id="side"></aside>
+<main class="app-main t-main">
+  <div class="t-top">
+    <div>
+      <h1 id="title"></h1>
+      <p class="t-lead">공유폴더의 config.json 내용이에요. 모든 개발자가 같이 봐요.</p>
+    </div>
+  </div>
+
+  <div class="notice" id="newNote" hidden>
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    <span id="newNoteText"></span>
+  </div>
+
+  <div class="t-row-ctl">
+  <div class="t-seg" role="tablist" aria-label="상세 정보">
+    <button type="button" role="tab" id="t-domains" aria-selected="true">도메인 정보</button>
+    <button type="button" role="tab" id="t-memo" aria-selected="false">공통 메모</button>
+  </div>
+  <div class="t-acts"><a class="btn" href="projects-list-toss.html">목록</a><a class="btn" id="goBrowse" href="#">디렉토리 조회</a></div>
+  </div>
+
+  <section class="t-card t-pad fill" id="card" aria-live="polite"></section>
+  <div class="t-bar" id="bar" hidden>
+    <span class="dirty">수정하는 중이에요</span>
+    <button class="btn" type="button" id="cancel">취소</button>
+    <button class="btn t-cta" type="button" id="save">저장</button>
+  </div>
+</main>
+
+<script src="app.js"></script>
+<script>
+/* 공유폴더의 config.json(도메인 정보·공통 메모)을 보여 주고 고친다. 저장할 때마다 서버가 최신 파일을 다시 읽어 합친다. */
+const name = new URLSearchParams(location.search).get("n") || "";
+const $ = id => document.getElementById(id);
+let rec = { domains: [], memo: "", at: "" }, loaded = false, loadErr = "";
+let tab = "domains", editing = false, draft = null, saving = false;
+
+$("title").textContent = name.replace(/\[.+\]$/, "");
+$("goBrowse").href = "project-browse-toss.html?n=" + encodeURIComponent(name);
+
+/* 메모 서식: # 큰 제목, ## 작은 제목, --- 구분선. 모든 글자는 esc를 거쳐서 HTML이 실행되지 않는다. */
+const memoHtml = t => t.split("\n").map(l => {
+  const h = l.match(/^(#{1,2}) (.*\S.*)$/);
+  if (h) return `<h${h[1].length + 2}>${esc(h[2].trim())}</h${h[1].length + 2}>`;
+  return /^\s*-{3,}\s*$/.test(l) ? "<hr>" : `<div class="ln">${esc(l)}</div>`;
+}).join("");
+const head = (t, extra) => `<div class="t-head">${t}${extra || ""}</div>`;
+const editBtn = '<button class="btn btn-sm" type="button" data-edit>수정</button>';
+
+function draw() {
+  document.querySelectorAll("[role=tab]").forEach(b => b.setAttribute("aria-selected", String(b.id === "t-" + tab)));
+  $("bar").hidden = !editing;
+  const c = $("card");
+  if (!loaded) {
+    c.innerHTML = loadErr ? `<div class="empty">${esc(loadErr)}<button class="btn btn-sm" type="button" data-retry>다시 시도</button></div>`
+      : `<div class="loading" role="status"><div class="bar"><i></i></div></div>`;
+    return;
+  }
+  if (tab === "domains" && !editing) {
+    c.innerHTML = head("도메인 정보", editBtn) + (rec.domains.length
+      ? `<div class="kv t-kv">${rec.domains.map((d, i) => `<div class="kv-row"><span class="k">${esc(d.l || "(이름 없음)")}</span><span class="v num">${esc(d.u)}</span>
+          <button class="t-go" type="button" data-open="${i}" aria-label="${esc(d.l)} 바로가기">바로가기${icon("external", 14)}</button></div>`).join("")}</div>`
+      : `<div class="empty">등록된 도메인이 없어요.<button class="btn btn-sm" type="button" data-edit>도메인 추가</button></div>`);
+  } else if (tab === "domains") {
+    c.innerHTML = head("도메인 수정") + `<div class="kv t-kv">${draft.map((d, i) => `<div class="kv-row edit"><input class="input" data-i="${i}" data-k="l" value="${esc(d.l)}" placeholder="이름 (예: 운영)" aria-label="도메인 이름 ${i + 1}">
+        <input class="input" data-i="${i}" data-k="u" value="${esc(d.u)}" placeholder="https://" aria-label="주소 ${i + 1}"><button class="icon-btn" type="button" data-del="${i}" aria-label="${i + 1}번 도메인 삭제">${icon("x")}</button></div>`).join("")}</div>
+        <button class="btn btn-dashed" type="button" data-add>+ 도메인 추가</button>`;
+  } else if (!editing) {
+    c.innerHTML = head("공통 메모", editBtn) + `<p class="t-sub" style="margin-bottom:16px">${rec.at ? "마지막 수정 " + rec.at : "아직 수정한 적이 없어요"}</p>` +
+      (rec.memo.trim() ? `<div class="memo">${memoHtml(rec.memo)}</div>` : `<div class="empty">작성된 메모가 없어요.<button class="btn btn-sm" type="button" data-edit>메모 작성</button></div>`);
+  } else {
+    c.innerHTML = head("공통 메모 수정") + `<p class="t-sub" style="margin:0 0 12px"><code># 큰 제목</code> <code>## 작은 제목</code> <code>---</code> 구분선 · # 뒤에는 공백이 필요하고, 저장하면 적용돼요.</p>
+      <textarea class="textarea memo-edit" id="memoTa" aria-label="공통 메모" placeholder="여러 명이 함께 보는 메모예요. 자유롭게 적어 주세요.">${esc(draft)}</textarea>`;
+  }
+}
+
+/** 서버의 config.json 내용을 읽어 화면 값으로 바꾼다. */
+async function load() {
+  loaded = false; loadErr = ""; draw();
+  try {
+    const d = await api.projects.detail(name);
+    rec = { domains: d.domains.map(x => ({ l: x.label, u: x.url })), memo: d.memo, at: d.memoUpdatedAt ? d.memoUpdatedAt.replace("T", " ").slice(0, 16) : "" };
+    $("newNote").hidden = d.exists && !d.corrupt;
+    $("newNoteText").innerHTML = d.corrupt ? "config.json 내용을 읽을 수 없어요. 저장하면 이전 파일은 <b>config.json.broken</b>으로 남기고 새로 만들어요."
+      : "아직 등록된 정보가 없어요. 내용을 저장하면 <b>config.json</b>이 새로 만들어져요.";
+    loaded = true;
+  } catch (e) { loadErr = e.message; }
+  draw();
+}
+
+function startEdit() {
+  editing = true; draft = tab === "domains" ? rec.domains.map(d => ({ ...d })) : rec.memo;
+  if (tab === "domains" && !draft.length) draft.push({ l: "", u: "" });
+  draw();
+  const f = $("card").querySelector("input, textarea"); if (f) f.focus();
+}
+const stop = () => { editing = false; draft = null; draw(); };
+
+$("card").addEventListener("click", async e => {
+  if (e.target.closest("[data-retry]")) return load();
+  if (e.target.closest("[data-edit]")) return startEdit();
+  const o = e.target.closest("[data-open]");
+  if (o) { try { await api.openUrl(rec.domains[+o.dataset.open].u); } catch (err) { toast(err.message); } return; }
+  if (e.target.closest("[data-add]")) { draft.push({ l: "", u: "" }); draw(); return $("card").querySelector(`[data-i="${draft.length - 1}"]`).focus(); }
+  const d = e.target.closest("[data-del]"); if (d) { draft.splice(+d.dataset.del, 1); draw(); }
+});
+$("card").addEventListener("input", e => {
+  if (e.target.dataset.k) draft[e.target.dataset.i][e.target.dataset.k] = e.target.value;
+  else if (e.target.id === "memoTa") draft = e.target.value;
+});
+$("cancel").addEventListener("click", stop);
+
+/** 현재 탭의 값을 서버에 저장한다. */
+const persist = (which, value) => which === "domains"
+  ? api.projects.saveDomains(name, value.map(d => ({ label: d.l, url: d.u })))
+  : api.projects.saveMemo(name, value);
+
+$("save").addEventListener("click", async () => {
+  if (saving) return;
+  const which = tab, before = which === "domains" ? rec.domains.map(d => ({ ...d })) : rec.memo; // 되돌리기용 이전 값
+  let value = draft;
+  if (which === "domains") {
+    const rows = draft.filter(d => d.l.trim() || d.u.trim());
+    if (rows.some(d => !d.u.trim())) return toast("주소가 비어 있는 도메인이 있어요. 주소를 입력해 주세요");
+    value = rows.map(d => ({ l: d.l.trim(), u: d.u.trim() }));
+  }
+  saving = true; $("save").disabled = true;
+  try { await persist(which, value); } catch (e) { saving = false; $("save").disabled = false; return toast("저장하지 못했어요: " + e.message); }
+  saving = false; $("save").disabled = false;
+  stop(); await load();
+  toast("저장했어요", async () => { try { await persist(which, before); await load(); } catch (e) { toast("되돌리지 못했어요: " + e.message); } });
+});
+document.querySelectorAll("[role=tab]").forEach(b => b.addEventListener("click", async () => {
+  if (b.id === "t-" + tab) return;
+  if (editing && !(await confirmDialog({ title: "수정한 내용을 버릴까요?", desc: "저장하지 않은 변경은 사라져요.", confirmLabel: "버리고 이동", danger: true }))) return;
+  tab = b.id.slice(2); editing = false; draft = null; draw();
+}));
+load();
+</script>
+</body>
+</html>

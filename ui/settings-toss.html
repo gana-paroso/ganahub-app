@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전역 설정 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="settings">
+<aside class="app-side" id="side"></aside>
+
+<main class="app-main t-main sp">
+  <div class="t-top"><div><h1>전역 설정</h1><p class="t-lead">공유폴더 인증, IDE 실행파일, 업무 포털 연동을 이 PC에 설정해요.</p></div></div>
+
+  <!-- 공유폴더 -->
+  <section class="t-card t-pad" id="shareCard">
+    <div class="t-head">공유폴더 연결 설정</div>
+    <p class="t-sub s-desc">개발팀 공용 프로젝트 정보가 저장된 NAS 공유폴더 접속정보예요.</p>
+    <div class="t-grid">
+      <label class="fld">공유폴더 IP<input class="input" id="sIp" placeholder="예: 192.168.0.10" autocomplete="off"></label>
+      <label class="fld">공유 이름<input class="input" id="sName" placeholder="예: data 또는 data\docs (하위 경로까지 포함 가능)" autocomplete="off"></label>
+      <label class="fld">ID<input class="input" id="sId" placeholder="접속 계정" autocomplete="off"></label>
+      <label class="fld">비밀번호<span class="pw"><input class="input" id="sPw" type="password" placeholder="등록된 비밀번호를 변경할 때만 입력" autocomplete="off"><button class="btn eye" type="button" data-eye="sPw" aria-label="보기" title="보기"></button></span><em class="hint">저장된 비밀번호가 등록되어 있어요</em></label>
+    </div>
+    <div class="notice lock"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>비밀번호는 Windows DPAPI로 암호화되어 이 PC에만 저장되며, 공유폴더에는 절대 저장되지 않아요.</span></div>
+    <div class="notice" id="sRes" hidden></div>
+    <div class="t-acts end s-act"><button class="btn" type="button" data-test="share">연결 테스트</button><button class="btn t-cta" type="button" data-save="share">저장</button></div>
+  </section>
+
+  <!-- IDE -->
+  <section class="t-card t-pad" id="ideCard">
+    <div class="t-head">IDE 설정</div>
+    <p class="t-sub s-desc">Eclipse, VSCode 등 실행 파일을 등록하면 IDE 관리에서 이름으로 골라 쓸 수 있어요.</p>
+    <div id="ideRows"></div>
+    <button class="btn btn-dashed" type="button" data-add>+ IDE 실행파일 추가</button>
+    <div class="t-acts end s-act"><button class="btn t-cta" type="button" data-save="ide">저장</button></div>
+  </section>
+
+  <!-- DB 관리 -->
+  <section class="t-card t-pad" id="dbCard">
+    <div class="t-head">DB 관리 설정</div>
+    <p class="t-sub s-desc">DB 관리의 ‘생성 / 권한 부여’에서 접근 허용 IP 기본값으로 채워져요. 이 PC에만 저장돼요.</p>
+    <div class="t-grid">
+      <label class="fld wide2">기본 접근 허용 IP<input class="input" id="dHosts" placeholder="쉼표로 구분 (예: localhost, 192.168.0.%)" autocomplete="off"><em class="hint">비워 두면 localhost 하나로 시작해요</em></label>
+    </div>
+    <div class="t-acts end s-act"><button class="btn t-cta" type="button" data-save="db">저장</button></div>
+  </section>
+
+  <!-- 업무 포털 -->
+  <section class="t-card t-pad" id="worksCard">
+    <div class="t-head">업무 포털 연동</div>
+    <p class="t-sub s-desc">간편접수에 쓰는 업무 포털(/works) 서버 정보예요.</p>
+    <div class="t-grid">
+      <label class="fld">서버 주소<input class="input" id="wUrl" placeholder="예: https://운영도메인 (끝 슬래시 없이)" autocomplete="off"></label>
+      <label class="fld">업무 ID<input class="input" id="wId" placeholder="업무 포털 로그인 ID (예: user)" autocomplete="off"></label>
+      <label class="fld wide2">공용 키<span class="pw"><input class="input" id="wKey" type="password" placeholder="등록된 키를 변경할 때만 입력" autocomplete="off"><button class="btn eye" type="button" data-eye="wKey" aria-label="보기" title="보기"></button></span><em class="hint">저장된 공용 키가 등록되어 있어요</em></label>
+      <div class="fld wide2">연동 규격<span class="pw"><input class="input" id="wProf" readonly><button class="btn" type="button" data-import-profile>규격 파일 가져오기</button></span><em class="hint">업무 포털의 접수 규격(주소 형식, 헤더, 필드 이름)이에요. 이 PC에만 저장되고 소스 저장소에는 들어 있지 않아요.</em></div>
+    </div>
+    <div class="notice lock"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>공용 키는 Windows DPAPI로 암호화되어 이 PC에만 저장돼요.</span></div>
+    <div class="notice" id="wRes" hidden></div>
+    <div class="t-acts end s-act"><button class="btn" type="button" data-test="works">연결 테스트</button><button class="btn t-cta" type="button" data-save="works">저장</button></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+<script>
+/* 이 PC의 설정 파일(global_settings.json)과 연결된다. 비밀번호·키는 "보기"를 눌렀을 때만 화면에 가져온다. */
+const $ = id => document.getElementById(id);
+let IDES = [];
+const has = { sPw: false, wKey: false }; // 저장된 비밀값이 있는지
+
+initSecretButtons(id => has[id] ? api.settings.reveal(id === "sPw" ? "share" : "works") : ""); // 눈·복사 버튼: 저장된 값을 필요할 때만 가져온다
+
+/* IDE 행: 점은 실행 파일이 실제로 있으면 초록 */
+function drawIde() {
+  $("ideRows").innerHTML = IDES.map((r, i) => `<div class="ide-row"><i class="dot${r.ok ? " ok" : ""}" title="${r.ok ? "파일을 찾았어요" : "파일을 찾을 수 없어요"}"></i>
+    <input class="input" data-i="${i}" data-k="n" value="${esc(r.n)}" placeholder="이름 (예: eGovFrameDev-4.3.0)" aria-label="IDE 이름 ${i + 1}" autocomplete="off">
+    <input class="input" data-i="${i}" data-k="p" value="${esc(r.p)}" placeholder="실행 파일 경로" aria-label="IDE 경로 ${i + 1}" autocomplete="off">
+    <button class="btn" type="button" data-browse="${i}">찾아보기</button><button class="icon-btn" type="button" data-del="${i}" aria-label="${i + 1}번 IDE 삭제">${icon("x")}</button></div>`).join("");
+}
+
+/** 저장된 비밀값 안내 문구: 등록돼 있으면 그렇게 알려 준다 */
+function hint(id) { $(id).closest(".fld").querySelector(".hint").textContent = has[id] ? "저장된 값이 등록되어 있어요. 눈 모양을 누르면 볼 수 있어요" : "아직 등록된 값이 없어요"; }
+
+const res = (id, ok, msg) => { const r = $(id); r.hidden = false; r.className = "notice" + (ok ? "" : " neg"); r.textContent = msg; };
+const fail = e => toast(e.message || String(e));
+const checkPath = async i => { IDES[i].ok = await api.fileExists(IDES[i].p); const row = document.querySelectorAll(".ide-row")[i]; if (row) { const d = row.querySelector(".dot"); d.classList.toggle("ok", IDES[i].ok); d.title = IDES[i].ok ? "파일을 찾았어요" : "파일을 찾을 수 없어요"; } };
+
+/** 연동 규격이 들어 있는지 입력칸에 보여 준다. */
+const showProfile = st => { $("wProf").value = st.ok ? "가져옴 (이 PC에 저장됨)" : "아직 가져오지 않았어요"; };
+api.works.profile().then(showProfile).catch(fail);
+api.settings.get().then(s => {
+  $("sIp").value = s.share.ip; $("sName").value = s.share.name; $("sId").value = s.share.id;
+  $("wUrl").value = s.works.url; $("wId").value = s.works.staffId;
+  $("dHosts").value = s.dbHosts.join(", ");
+  has.sPw = s.share.hasPassword; has.wKey = s.works.hasKey; hint("sPw"); hint("wKey");
+  IDES = s.ide.map(r => ({ n: r.name, p: r.exePath, ok: r.exists }));
+  drawIde();
+}).catch(fail);
+
+document.body.addEventListener("click", async e => {
+  const t = e.target;
+  try {
+    if (t.closest("[data-import-profile]")) { const st = await api.works.importProfile(); if (st) { showProfile(st); toast("연동 규격을 가져왔어요"); } return; }
+    const br = t.closest("[data-browse]");
+    if (br) { const p = await api.pickExe(); if (p) { const i = +br.dataset.browse; IDES[i].p = p; drawIde(); await checkPath(i); } return; }
+    if (t.closest("[data-add]")) { IDES.push({ n: "", p: "", ok: false }); drawIde(); return document.querySelector(`[data-i="${IDES.length - 1}"]`).focus(); }
+    const d = t.closest("[data-del]"); if (d) { IDES.splice(+d.dataset.del, 1); return drawIde(); }
+    const test = t.closest("[data-test]");
+    if (test) {
+      if (test.dataset.test === "works") {
+        test.disabled = true; res("wRes", true, "연결하는 중이에요…");
+        try { const r = await api.works.test({ url: $("wUrl").value, key: $("wKey").value, staffId: $("wId").value }); res("wRes", true, `연결되었어요. 직원: ${r.staffName}`); }
+        catch (e) { res("wRes", false, e.message); } finally { test.disabled = false; }
+        return;
+      }
+      if (!$("sIp").value.trim() || !$("sName").value.trim() || !$("sId").value.trim()) return res("sRes", false, "IP, 공유 이름, ID를 모두 입력해 주세요.");
+      test.disabled = true; res("sRes", true, "연결하는 중이에요…");
+      try { const r = await api.settings.testShare({ ip: $("sIp").value, name: $("sName").value, id: $("sId").value, password: $("sPw").value }); res("sRes", r.ok, r.message); }
+      finally { test.disabled = false; }
+      return;
+    }
+    const save = t.closest("[data-save]"); if (!save) return;
+    if (save.dataset.save === "ide") {
+      if (IDES.some(r => !r.n.trim() || !r.p.trim())) return toast("이름과 경로가 비어 있는 행이 있어요");
+      await api.settings.saveIde(IDES.map(r => ({ name: r.n, exePath: r.p })));
+      return toast("IDE 설정을 저장했어요");
+    }
+    if (save.dataset.save === "db") {
+      await api.settings.saveDbHosts($("dHosts").value.split(/[,\s]+/).filter(Boolean));
+      return toast("DB 기본 허용 IP를 저장했어요");
+    }
+    if (save.dataset.save === "share") {
+      await api.settings.saveShare({ ip: $("sIp").value, name: $("sName").value, id: $("sId").value, password: $("sPw").value });
+      if ($("sPw").value) has.sPw = true;
+      $("sPw").value = ""; $("sPw").type = "password"; document.querySelector('[data-eye="sPw"]').innerHTML = EYE; hint("sPw");
+      return toast("공유폴더 설정을 저장했어요");
+    }
+    await api.settings.saveWorks({ url: $("wUrl").value, staffId: $("wId").value, key: $("wKey").value });
+    if ($("wKey").value) has.wKey = true;
+    $("wKey").value = ""; $("wKey").type = "password"; document.querySelector('[data-eye="wKey"]').innerHTML = EYE; hint("wKey");
+    toast("업무 포털 설정을 저장했어요");
+  } catch (err) { fail(err); }
+});
+let pathTimer;
+document.body.addEventListener("input", e => {
+  const i = e.target.dataset.i; if (i === undefined) return;
+  IDES[+i][e.target.dataset.k] = e.target.value;
+  if (e.target.dataset.k === "p") { clearTimeout(pathTimer); pathTimer = setTimeout(() => checkPath(+i), 300); } // 입력이 멈추면 파일이 있는지 확인
+});
+</script>
+</body>
+</html>

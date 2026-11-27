@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.key
+*.log
+*.local.json
+release-notes.md
+.design/
+.private/

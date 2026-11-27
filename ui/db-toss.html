@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB 관리 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="db">
+<aside class="app-side" id="side"></aside>
+
+<main class="app-main t-main">
+  <div class="t-top"><div><h1>DB 관리</h1>
+    <p class="t-lead">SSH로 서버에 접속해서 MySQL 데이터베이스와 사용자를 만들고 권한을 정리해요.</p></div></div>
+
+  <!-- 서버 연결: 한 줄 카드 -->
+  <section class="t-card t-srv" aria-label="서버 연결">
+    <label class="srv-sel">SSH 연결<select class="input" id="ssh"></select></label>
+    <div class="srv-info" id="info"></div>
+    <button class="btn" type="button" id="srvTest">연결테스트</button>
+  </section>
+
+  <div class="t-row-ctl">
+    <div class="t-seg" role="tablist" id="tabs" aria-label="DB 작업">
+      <button type="button" role="tab" data-p="db" aria-selected="true">Database</button>
+      <button type="button" role="tab" data-p="users" aria-selected="false">사용자 / Host</button>
+      <button type="button" role="tab" data-p="grant" aria-selected="false">생성 / 권한 부여</button>
+    </div>
+    <div class="t-acts"><button class="btn" type="button" id="refresh">새로고침</button></div>
+  </div>
+
+  <section class="t-card fill db-body" id="body" aria-live="polite"></section>
+  <div class="t-bar" id="runbar" hidden>
+    <span class="dirty">서버에서 실제로 실행돼요. 이름과 권한을 한 번 더 확인해 주세요.</span>
+    <button class="btn t-cta" type="button" id="run">SSH 원격 실행 (DB 생성 / 권한 부여)</button>
+  </div>
+
+  <section class="term" aria-label="실행 로그">
+    <div class="term-bar"><span id="termTitle">ssh</span><span class="term-st" id="termSt">대기 중</span><button type="button" id="termClear">지우기</button></div>
+    <div class="term-body" id="term"><div class="term-ph">실행 로그가 여기에 표시돼요.</div></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+<script>
+/* 연결 관리에 등록된 SSH 서버에 접속해 원격 MySQL 의 Database·사용자·권한을 다룬다. 서버에 보내는 명령은 한 번에 하나씩만 실행된다. */
+const PRIVS = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "REFERENCES", "CREATE TEMPORARY TABLES", "LOCK TABLES", "CREATE VIEW", "SHOW VIEW", "TRIGGER", "EVENT", "EXECUTE", "CREATE ROUTINE", "ALTER ROUTINE"];
+const PRESETS = { read: ["SELECT"], write: ["SELECT", "INSERT", "UPDATE", "DELETE"] };
+const $ = id => document.getElementById(id);
+let SERVERS = [], data = null /* { databases, users: {이름: [host...]}, inUse } */, details = {} /* 사용자별 { hosts: [{host, grants}] } */;
+let pane = "db", sel = "", mode = "new", preset = "all", ips = ["localhost"], busy = false, loadingUser = "";
+const srv = () => SERVERS.find(s => s.id === $("ssh").value);
+
+function drawInfo() {
+  const s = srv(); if (!s) return;
+  $("termTitle").textContent = `ssh ${s.user}@${s.host}`;
+  $("info").innerHTML = [["Host", s.host], ["Port", s.port], ["SSH ID", s.user], ["MySQL 계정", s.my || "미등록"]].map(([k, v]) => `<span class="chip"><b>${k}</b><span class="num">${esc(v)}</span></span>`).join("")
+    + `<span class="srv-hint">연결 관리에서 수정할 수 있어요</span>`;
+}
+
+/* ───── 로그 터미널 ───── */
+const LV = { cmd: "cmd", success: "ok", error: "err", info: "" };
+const log = (lv, m) => { const t = $("term"); t.querySelector(".term-ph")?.remove(); t.insertAdjacentHTML("beforeend", `<div class="ln ${LV[lv] ?? ""}">${esc(m)}</div>`); t.scrollTop = t.scrollHeight; };
+api.onDbLog(({ level, message }) => log(level, message));
+
+/** 작업 중에는 화면의 버튼을 잠그고, 끝나면 원래 상태로 되돌린다. */
+function lock(on) {
+  document.querySelectorAll("main button").forEach(b => {
+    if (on) { b.dataset.was = b.disabled ? "1" : "0"; b.disabled = true; }
+    else if (b.dataset.was !== undefined) { b.disabled = b.dataset.was === "1"; delete b.dataset.was; }
+  });
+}
+
+/** 서버 작업을 실행한다. 다른 작업이 실행 중이면 막고, 결과({ ok, data })를 돌려준다. 실행 자체가 실패하면 null. */
+async function act(action, args) {
+  if (busy) { toast("다른 작업이 실행 중이에요"); return null; }
+  busy = true; $("termSt").textContent = "실행 중"; $("termSt").classList.add("on"); lock(true);
+  try { return await api.db.run({ serverId: $("ssh").value, action, args }); }
+  catch (e) { log("error", "[ERROR] " + e.message); toast(e.message); return null; }
+  finally { busy = false; $("termSt").textContent = "대기 중"; $("termSt").classList.remove("on"); lock(false); }
+}
+
+/** Database·사용자 목록을 서버에서 다시 읽는다. */
+async function refresh() {
+  const r = await act("overview");
+  if (!r || !r.ok) { if (r) toast("불러오지 못했어요. 아래 로그를 확인해 주세요"); return false; }
+  data = r.data; details = {};
+  if (!data.users[sel]) sel = Object.keys(data.users)[0] || "";
+  draw();
+  if (pane === "users" && sel) await loadUser(sel);
+  return true;
+}
+async function loadUser(name) {
+  sel = name; loadingUser = name; draw();
+  const r = await act("userDetail", { user: name });
+  loadingUser = "";
+  if (r && r.ok) details[name] = r.data;
+  draw();
+}
+const done = (r, msg) => { if (r && r.ok) { toast(msg); return true; } if (r) toast("실패했어요. 아래 로그를 확인해 주세요"); return false; };
+
+/* ───── 화면 ───── */
+function head(title, n) { return `<div class="t-head">${title}<span class="num">${n}</span></div>`; }
+const notLoaded = `<div class="t-empty">아직 서버에서 불러오지 않았어요.<br><button class="btn" type="button" data-load>서버에서 불러오기</button></div>`;
+
+function drawDb() {
+  if (!data) return notLoaded;
+  const DBS = data.databases;
+  return head("Database", DBS.length + "개") + `<div class="t-list">` + (DBS.length ? DBS.map(n => `<div class="t-db"><span class="t-name">${esc(n)}</span><button class="t-go del" type="button" data-drop="${esc(n)}">삭제</button></div>`).join("")
+    : `<div class="t-empty">만들어진 데이터베이스가 없어요.</div>`) + `</div>`;
+}
+
+function drawUsers() {
+  if (!data) return notLoaded;
+  const names = Object.keys(data.users), d = details[sel];
+  const left = `<div class="u-col">${head("사용자", names.length + "명")}<div class="t-list">${names.map(n => `<button type="button" class="t-db pick${n === sel ? " on" : ""}" data-user="${esc(n)}"><span class="t-name">${esc(n)}</span><span class="t-sub">host ${data.users[n].length}개</span></button>`).join("")}</div></div>`;
+  let right = `<div class="u-detail"><div class="t-empty">${names.length ? "왼쪽에서 사용자를 선택해 주세요." : "표시할 사용자가 없어요."}</div></div>`;
+  if (sel && loadingUser === sel) right = `<div class="u-detail"><div class="t-empty">${esc(sel)} 정보를 불러오는 중이에요…</div></div>`;
+  else if (sel && d) {
+    const lk = sel === data.inUse, dis = lk ? ` disabled title="이 앱의 연결에 사용 중인 계정은 조작할 수 없어요"` : "";
+    right = `<div class="u-detail"><div class="t-head">${esc(sel)}${lk ? '<span class="ty ssh">연결에 사용 중</span>' : ""}</div>
+      ${d.hosts.map(h => `<div class="host"><div class="host-h"><b class="num">${esc(h.host)}</b><span class="t-acts"><button class="t-go" type="button" data-pw="${esc(h.host)}"${dis}>비밀번호 변경</button><button class="t-go del" type="button" data-dropu="${esc(h.host)}"${dis}>계정 삭제</button></span></div>
+        ${h.grants.length ? h.grants.map(g => `<div class="grant"><b class="num g-t">${esc(g.target)}</b><span class="g-p">${esc(g.privileges)}</span>${g.target.endsWith(".*") && g.target !== "*.*" ? `<button class="t-go" type="button" data-rev="${esc(h.host)}|${esc(g.target.slice(0, -2))}"${dis}>권한 회수</button>` : ""}</div>`).join("") : `<div class="grant muted">부여된 권한 없음</div>`}</div>`).join("")}
+      <h3 class="t-h3 tight">Host 추가</h3>
+      <div class="addhost"><input class="input" id="ah" placeholder="예: 192.168.0.% 또는 localhost" autocomplete="off"><input class="input" id="ap" type="password" placeholder="새 host 계정 비밀번호" autocomplete="off"><button class="btn t-cta" type="button" data-addhost${dis}>추가</button></div>
+      <p class="t-sub">같은 사용자라도 host가 다르면 별개의 계정이라 비밀번호가 필요해요. 권한은 ‘생성 / 권한 부여’에서 부여해요.</p></div>`;
+  }
+  return `<div class="u-wrap">${left}${right}</div>`;
+}
+
+function drawGrant() {
+  const users = data ? Object.keys(data.users) : [];
+  return `<div class="t-pad"><div class="t-grid">
+    <label class="fld">신규 Database명<input class="input" id="gDb" placeholder="예: myproject_dev" autocomplete="off"></label>
+    <div class="fld">사용자 구분<div class="t-seg inline" id="modeSw"><button type="button" data-m="new" aria-selected="${mode === "new"}">신규 사용자</button><button type="button" data-m="existing" aria-selected="${mode === "existing"}">기존 사용자</button></div></div>
+    ${mode === "new" ? `<label class="fld">User ID<input class="input" id="gUser" placeholder="예: myproject_user" autocomplete="off"></label><label class="fld">User PW<input class="input" id="gPw" type="password" placeholder="계정 비밀번호" autocomplete="off"></label>`
+    : `<label class="fld">기존 사용자<select class="input" id="gUser">${users.length ? users.map(n => `<option>${esc(n)}</option>`).join("") : "<option value=''>(‘Database’ 탭에서 먼저 불러오세요)</option>"}</select></label><label class="fld">새 host 계정 비밀번호 (선택)<input class="input" id="gPw" type="password" placeholder="없는 host를 추가할 때만 입력" autocomplete="off"></label>`}
+    <div class="fld wide2">권한<div class="t-seg inline" id="presetSw">${[["all", "전체 (ALL)"], ["read", "읽기 전용"], ["write", "읽기/쓰기"], ["custom", "직접 선택"]].map(([k, l]) => `<button type="button" data-pr="${k}" aria-selected="${preset === k}">${l}</button>`).join("")}</div>
+      <div class="priv${preset === "custom" ? "" : " off"}">${PRIVS.map(p => `<label><input type="checkbox" value="${p}"${preset === "custom" ? "" : " disabled"}${preset === "all" || (PRESETS[preset] || []).includes(p) ? " checked" : ""}>${p}</label>`).join("")}</div></div>
+    <div class="fld wide2">접근 허용 IP<div id="ipRows">${ips.map((v, i) => `<div class="iprow"><input class="input" data-ip="${i}" value="${esc(v)}" placeholder="예: 192.168.0.% 또는 localhost" autocomplete="off"><button class="icon-btn" type="button" data-ipdel="${i}" aria-label="IP 삭제">${icon("x")}</button></div>`).join("")}</div>
+      <button class="btn btn-dashed" type="button" data-ipadd>+ IP 추가</button></div>
+  </div></div>`;
+}
+
+function draw() {
+  document.querySelectorAll("#tabs [role=tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.p === pane)));
+  $("runbar").hidden = pane !== "grant";
+  $("body").innerHTML = pane === "db" ? drawDb() : pane === "users" ? drawUsers() : drawGrant();
+  if (busy) lock(true); // 작업 중에 다시 그려도 버튼은 잠긴 채로 둔다
+}
+
+/** 새 비밀번호를 입력받는 창. 취소하면 null. */
+function askPassword(title, desc) {
+  return new Promise(resolve => {
+    const d = document.createElement("dialog"); d.className = "dlg";
+    d.innerHTML = `<form method="dialog"><h2>${esc(title)}</h2><p>${esc(desc)}</p><input class="input" id="npw" type="password" autocomplete="off" placeholder="새 비밀번호" style="width:100%;margin-top:8px">
+      <div class="dlg-actions"><button class="btn" value="no">취소</button><button class="btn btn-primary" value="yes">변경</button></div></form>`;
+    document.body.append(d);
+    let finished = false;
+    const finish = v => { if (finished) return; finished = true; resolve(v); setTimeout(() => d.remove(), 0); };
+    d.querySelector("form").addEventListener("submit", e => finish(e.submitter && e.submitter.value === "yes" ? d.querySelector("#npw").value : null));
+    d.addEventListener("close", () => finish(null));
+    d.showModal(); d.querySelector("#npw").focus();
+  });
+}
+
+/* ───── 이벤트 ───── */
+$("tabs").addEventListener("click", async e => {
+  const b = e.target.closest("[role=tab]"); if (!b) return;
+  pane = b.dataset.p; draw();
+  if (pane === "users" && data && sel && !details[sel]) await loadUser(sel);
+});
+$("ssh").addEventListener("change", () => { data = null; details = {}; sel = ""; drawInfo(); draw(); });
+$("srvTest").addEventListener("click", async () => { const r = await act("test"); if (r) toast(r.ok ? "서버 연결에 성공했어요" : "연결하지 못했어요. 아래 로그를 확인해 주세요"); });
+$("refresh").addEventListener("click", async () => { if (await refresh()) toast("새로 불러왔어요"); });
+$("termClear").addEventListener("click", () => { $("term").innerHTML = '<div class="term-ph">실행 로그가 여기에 표시돼요.</div>'; });
+
+$("body").addEventListener("click", async e => {
+  const t = e.target, c = s => t.closest(s);
+  if (c("[data-load]")) return refresh();
+  if (c("[data-drop]")) { const n = c("[data-drop]").dataset.drop;
+    if (await confirmDialog({ title: `‘${n}’ 데이터베이스를 삭제할까요?`, desc: "서버에서 바로 삭제돼요. 되돌릴 수 없어요.", confirmLabel: "삭제", danger: true }))
+      if (done(await act("dropDatabase", { db: n }), "삭제했어요")) await refresh();
+    return; }
+  if (c("[data-user]")) return loadUser(c("[data-user]").dataset.user);
+  if (c("[data-pw]")) { const h = c("[data-pw]").dataset.pw;
+    const pw = await askPassword(`‘${sel}@${h}’ 비밀번호 변경`, "서버에서 바로 바뀌어요. 이 계정을 쓰는 곳의 비밀번호도 함께 바꿔 주세요.");
+    if (pw !== null) done(await act("password", { user: sel, host: h, password: pw }), "비밀번호를 변경했어요");
+    return; }
+  if (c("[data-dropu]")) { const h = c("[data-dropu]").dataset.dropu;
+    if (await confirmDialog({ title: `‘${sel}@${h}’ 계정을 삭제할까요?`, desc: "이 host의 계정과 권한이 모두 사라져요.", confirmLabel: "삭제", danger: true }))
+      if (done(await act("dropUser", { user: sel, host: h }), "삭제했어요")) await refresh();
+    return; }
+  if (c("[data-rev]")) { const [h, db] = c("[data-rev]").dataset.rev.split("|");
+    if (done(await act("revoke", { user: sel, host: h, db }), "권한을 회수했어요")) await loadUser(sel);
+    return; }
+  if (c("[data-addhost]")) { const h = $("ah").value.trim(), p = $("ap").value;
+    if (!h || !p) return toast("host와 비밀번호를 입력해 주세요");
+    if (done(await act("addHost", { user: sel, host: h, password: p }), "host를 추가했어요")) { const u = sel; await refresh(); await loadUser(u); }
+    return; }
+  if (c("[data-m]")) { mode = c("[data-m]").dataset.m; return draw(); }
+  if (c("[data-pr]")) { preset = c("[data-pr]").dataset.pr; return draw(); }
+  if (c("[data-ipadd]")) { ips.push(""); return draw(); }
+  if (c("[data-ipdel]")) { ips.splice(+c("[data-ipdel]").dataset.ipdel, 1); if (!ips.length) ips = [""]; return draw(); }
+});
+$("body").addEventListener("input", e => { if (e.target.dataset.ip !== undefined) ips[+e.target.dataset.ip] = e.target.value; });
+$("run").addEventListener("click", async () => {
+  const db = $("gDb").value.trim(), u = $("gUser").value.trim(), pw = $("gPw").value, hosts = ips.map(s => s.trim()).filter(Boolean);
+  if (!db) return toast("신규 Database명을 입력해 주세요");
+  if (!u) return toast("사용자를 입력해 주세요");
+  if (mode === "new" && !pw) return toast("User PW를 입력해 주세요");
+  if (!hosts.length) return toast("접근 허용 IP를 하나 이상 입력해 주세요");
+  const privileges = preset === "all" ? ["ALL"] : [...document.querySelectorAll(".priv input:checked")].map(i => i.value);
+  if (!privileges.length) return toast("권한을 하나 이상 선택해 주세요");
+  if (done(await act("create", { db, mode, user: u, password: pw, hosts, privileges }), "작업이 완료됐어요")) { pane = "db"; await refresh(); }
+});
+
+(async () => {
+  try { const hosts = (await api.settings.get()).dbHosts; ips = hosts.length ? hosts : ["localhost"]; } catch { /* 설정을 못 읽으면 localhost 로 시작한다 */ }
+  try { SERVERS = await api.db.servers(); } catch (e) { toast(e.message); }
+  if (!SERVERS.length) {
+    $("ssh").innerHTML = ""; $("srvTest").disabled = $("refresh").disabled = $("run").disabled = true;
+    $("info").innerHTML = `<span class="srv-hint">연결 관리에서 SSH 연결을 먼저 등록해 주세요</span>`;
+    $("body").innerHTML = `<div class="t-empty">등록된 SSH 연결이 없어요.<br><a class="btn t-cta" href="connections-toss.html">연결 관리로 이동</a></div>`;
+    return;
+  }
+  $("ssh").innerHTML = SERVERS.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  drawInfo(); draw();
+})();
+</script>
+</body>
+</html>

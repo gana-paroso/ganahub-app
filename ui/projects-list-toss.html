@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프로젝트 관리 · GanaHub</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="toss.css">
+</head>
+<body data-nav="projects">
+<aside class="app-side" id="side"></aside>
+
+<main class="app-main t-main">
+  <div class="t-top">
+    <div>
+      <h1>프로젝트</h1>
+      <p class="t-lead" id="lead"></p>
+    </div>
+  </div>
+
+  <div class="t-toolbar">
+  <div class="t-seg" role="tablist" aria-label="보기 범위">
+    <button type="button" role="tab" data-f="all" aria-selected="true">전체<span class="n num" id="n-all"></span></button>
+    <button type="button" role="tab" data-f="fav" aria-selected="false">즐겨찾기<span class="n num" id="n-fav"></span></button>
+  </div>
+
+  <form class="t-search" id="searchForm" role="search">
+    <div class="search-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input class="input" id="q" type="search" placeholder="프로젝트 이름으로 찾기" aria-label="프로젝트명 검색" autocomplete="off"></div>
+    <button class="btn t-cta" type="submit">검색</button>
+  </form>
+  </div>
+
+  <div class="t-split">
+    <section class="t-card" id="list" aria-label="프로젝트 목록"></section>
+  </div>
+</main>
+
+<script src="app.js"></script>
+<script>
+/* 공유폴더의 프로젝트 폴더와 각 프로젝트의 config.json 도메인을 보여 준다. 이름 끝 [IDE]는 IDE 구분. */
+let NAMES = [], DOM = {}; // DOM: 프로젝트별 [[이름, 주소], ...] (config.json 이 없으면 배지를 숨긴다)
+let favs = new Set(), scope = "all", term = "", status = "loading", errMsg = "";
+const $ = id => document.getElementById(id);
+const parse = n => { const m = n.match(/^(.+)\[(.+)\]$/); return m ? { name: m[1], ide: m[2] } : { name: n, ide: "" }; };
+const q = encodeURIComponent;
+const bare = u => u.replace(/^https?:\/\//i, "");
+
+function drawList() {
+  $("n-all").textContent = NAMES.length; $("n-fav").textContent = favs.size;
+  document.querySelectorAll(".t-seg [role=tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.f === scope)));
+  if (status === "loading") {
+    $("lead").textContent = "공유폴더에서 프로젝트를 불러오고 있어요…";
+    $("list").innerHTML = `<div class="loading" role="status" style="padding:16px 20px"><div class="bar"><i></i></div>${[55, 40, 62, 36].map(w => `<div class="skel"><i style="width:${w}%"></i></div>`).join("")}</div>`;
+    return;
+  }
+  if (status === "need") {
+    $("lead").textContent = "공유폴더 접속정보가 필요해요.";
+    $("list").innerHTML = `<div class="t-empty">공유폴더 접속정보가 비어 있어요.<br>전역 설정에서 IP, 공유 이름, ID, 비밀번호를 먼저 등록해 주세요.<br><a class="btn t-cta" href="settings-toss.html">전역 설정으로 이동</a></div>`;
+    return;
+  }
+  if (status === "error") {
+    $("lead").textContent = "공유폴더에 연결하지 못했어요.";
+    $("list").innerHTML = `<div class="t-empty">${esc(errMsg)}<br><button class="btn" type="button" data-retry>다시 시도</button> <a class="btn" href="settings-toss.html">전역 설정</a></div>`;
+    return;
+  }
+  $("lead").innerHTML = `공유폴더에 프로젝트가 <b class="num">${NAMES.length}개</b> 있어요. 즐겨찾기한 ${favs.size}개는 맨 위에 보여요.`;
+  const t = term.toLowerCase();
+  const list = NAMES.filter(n => (scope === "all" || favs.has(n)) && (!t || n.toLowerCase().includes(t))).sort((a, b) => favs.has(b) - favs.has(a));
+  if (!list.length) {
+    $("list").innerHTML = `<div class="t-empty">${term ? "검색 결과가 없어요.<br>다른 이름으로 찾아볼까요?" : NAMES.length ? "아직 즐겨찾기한 프로젝트가 없어요.<br>목록의 별을 눌러 담아 보세요." : "공유폴더에 프로젝트 폴더가 없어요."}<br>
+      ${NAMES.length ? `<button class="btn" type="button" data-reset>${term ? "검색 초기화" : "전체 보기"}</button>` : ""}</div>`;
+    return;
+  }
+  $("list").innerHTML = `<div class="t-head">${term ? `‘${esc(term)}’ 검색 결과` : scope === "fav" ? "즐겨찾기" : "모든 프로젝트"}<span class="num">${list.length}개</span></div><div class="t-list">` +
+    list.map(n => { const p = parse(n), on = favs.has(n), e = esc(n);
+      const ds = DOM[n] || [], bd = ds.slice(0, 2).map(([k, u]) => `<span class="dom"><b>${esc(k)}</b>${esc(bare(u))}</span>`).join("") + (ds.length > 2 ? `<span class="dom more">+${ds.length - 2}</span>` : "");
+      return `<div class="t-row">
+        <button class="star" type="button" data-star="${e}" aria-pressed="${on}" aria-label="${esc(p.name)} 즐겨찾기">${icon("star")}</button>
+        <div class="t-name"><span>${esc(p.name)}</span>${bd}</div>
+        <a class="t-go" href="project-detail-toss.html?n=${q(n)}" aria-label="${esc(p.name)} 상세보기">상세보기</a>
+        <a class="t-go" href="project-browse-toss.html?n=${q(n)}" aria-label="${esc(p.name)} 디렉토리 조회">디렉토리 조회</a></div>`; }).join("") + "</div>";
+}
+
+const draw = drawList;
+
+/** 목록을 먼저 보여 주고, 도메인 배지는 읽는 대로 뒤따라 채운다. */
+async function load() {
+  status = "loading"; draw();
+  try {
+    const r = await api.projects.list();
+    if (!r.configured) { status = "need"; return draw(); }
+    if (r.error) { status = "error"; errMsg = r.error; return draw(); }
+    NAMES = r.names; favs = new Set(r.favorites.filter(f => NAMES.includes(f))); status = "ok"; draw();
+    const doms = await api.projects.domains(NAMES);
+    DOM = Object.fromEntries(Object.entries(doms).map(([n, ds]) => [n, ds.map(d => [d.label, d.url])])); draw();
+  } catch (e) { status = "error"; errMsg = e.message; draw(); }
+}
+
+async function toggleFav(n) {
+  try { await api.projects.favorite(n); } catch (e) { return toast(e.message); }
+  const was = favs.has(n); was ? favs.delete(n) : favs.add(n); draw();
+  toast(was ? `‘${parse(n).name}’을 즐겨찾기에서 뺐어요` : `‘${parse(n).name}’을 즐겨찾기에 담았어요`, async () => {
+    try { await api.projects.favorite(n); } catch (e) { return toast(e.message); }
+    was ? favs.add(n) : favs.delete(n); draw();
+  });
+}
+$("list").addEventListener("click", e => {
+  const s = e.target.closest("[data-star]"); if (s) return toggleFav(s.dataset.star);
+  if (e.target.closest("[data-retry]")) return load();
+  if (e.target.closest("[data-reset]")) { term = ""; scope = "all"; $("q").value = ""; return draw(); }
+});
+document.querySelector(".t-seg").addEventListener("click", e => { const b = e.target.closest("[role=tab]"); if (b) { scope = b.dataset.f; draw(); } });
+$("searchForm").addEventListener("submit", e => { e.preventDefault(); term = $("q").value.trim(); draw(); });
+load();
+</script>
+</body>
+</html>
