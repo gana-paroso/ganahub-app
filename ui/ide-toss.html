@@ -18,7 +18,7 @@
 const $ = id => document.getElementById(id);
 const TY = { eclipse: "Eclipse", vscode: "VS Code" };
 let P = [], OPT = { ides: [], linkable: [], linkError: "", git: [], jenkins: [] }, loaded = false, loadErr = "";
-let view = "list", cur = null, dtab = "info", btab = "git", gtab = "pull", term = "", pmEdit = false, F = null, bdtab = "log", busy = "";
+let view = "list", cur = null, dtab = "info", btab = "git", gtab = "pull", term = "", pmEdit = false, F = null, bdtab = "log", busy = "", busyAt = 0, busyTimer = null;
 let G = null /* Git: { s: 요약, f: 원격 확인 결과, checked: Set(경로), tag, msg, text, tagText } */, J = null /* Jenkins: { builds, sel, detail, loading, error } */, COMMON = {} /* 연동 프로젝트별 공통 메모 */;
 const proj = () => P.find(p => p.id === cur);
 const nameOf = (arr, id) => (!id ? "" : (arr.find(x => x.id === id) || {}).name || "(삭제된 연결)");
@@ -177,7 +177,7 @@ function jenPanel(p) {
 function vBuild() {
   const p = proj();
   return hd("빌드 &amp; 배포", "Git으로 소스를 맞추고 Jenkins로 빌드해요.", ` <span class="ty ide-${p.type}">${esc(p.name)}</span>`) + `<div class="t-row-ctl">${seg("bt", [["git", "Git"], ["jenkins", "Jenkins"]], btab)}
-    <div class="t-acts"><button class="btn" type="button" data-a="detail">상세화면</button><button class="btn" type="button" data-a="list">목록</button></div></div>` + (btab === "git" ? gitPanel(p) : jenPanel(p)) + (busy ? `<div class="t-bar"><span class="dirty">${esc(busy)}</span></div>` : "");
+    <div class="t-acts"><button class="btn" type="button" data-a="detail">상세화면</button><button class="btn" type="button" data-a="list">목록</button></div></div>` + (btab === "git" ? gitPanel(p) : jenPanel(p));
 }
 
 /* ───── Git · Jenkins 불러오기와 실행 ───── */
@@ -198,11 +198,11 @@ async function loadTag() {
 /** Git 작업 하나를 실행한다. 실행하는 동안 화면을 잠그고, 끝나면 저장소 정보를 다시 읽는다. */
 async function gitDo(label, fn) {
   if (busy) return;
-  busy = label; draw(true);
+  setBusy(label); draw(true);
   try { return await fn(); } catch (e) { G.msg = { ok: false, text: e.message }; }
   finally {
-    busy = "";
     try { const s = await api.git.summary(cur); if (s.ok) { G.s = s; const keep = new Set(s.changedFiles.map(x => x.path)); G.checked = new Set([...G.checked].filter(x => keep.has(x))); } } catch { /* 요약을 못 읽어도 결과 메시지는 보여 준다 */ }
+    clearBusy(); // 저장소 정보까지 다시 읽은 뒤에 로딩 화면을 걷는다
     draw(true);
   }
 }
@@ -219,9 +219,18 @@ async function pickBuild(n) {
 }
 
 /* ───── 그리기·이벤트 ───── */
+/** 서버에 요청을 보내는 동안의 로딩 화면. 문구와 경과 시간을 보여 주고, 끝날 때까지 화면 전체를 막는다. */
+function setBusy(label) {
+  busy = label; busyAt = Date.now();
+  clearInterval(busyTimer);
+  busyTimer = setInterval(() => { const t = $("busyT"); if (t) t.textContent = `${Math.floor((Date.now() - busyAt) / 1000)}초 경과`; }, 1000);
+}
+function clearBusy() { busy = ""; clearInterval(busyTimer); busyTimer = null; }
+const busyHtml = () => `<div class="busy-ov" role="alert" aria-live="assertive"><div class="busy-box"><i class="spin" aria-hidden="true"></i><b>${esc(busy)}</b><span>끝날 때까지 기다려 주세요 · <em id="busyT">${Math.floor((Date.now() - busyAt) / 1000)}초 경과</em></span></div></div>`;
+
 function draw(keepScroll) {
   const top = $("v").scrollTop;
-  $("v").innerHTML = { list: vList, detail: vDetail, form: vForm, build: vBuild }[view]();
+  $("v").innerHTML = { list: vList, detail: vDetail, form: vForm, build: vBuild }[view]() + (busy ? busyHtml() : "");
   $("v").scrollTop = keepScroll ? top : 0;
   if (busy) document.querySelectorAll("#v button").forEach(b => { b.disabled = true; }); // 작업 중에는 모든 버튼을 잠근다
 }
@@ -307,9 +316,9 @@ $("v").addEventListener("click", async e => {
           if (r.ok) { G.text = ""; G.tagText = ""; G.tag = null; G.f = null; }
         }).then(() => { if (G && G.msg && G.msg.ok) loadTag(); });
       }
-      case "jbuild": { busy = "빌드를 요청하는 중이에요…"; draw(true); try { toast(await api.jen.build(cur)); setTimeout(() => { if (view === "build" && btab === "jenkins") loadJen(true); }, 2500); } finally { busy = ""; draw(true); } return; }
+      case "jbuild": { setBusy("Jenkins에 빌드를 요청하는 중이에요…"); draw(true); try { toast(await api.jen.build(cur)); setTimeout(() => { if (view === "build" && btab === "jenkins") loadJen(true); }, 2500); } finally { clearBusy(); draw(true); } return; }
     }
-  } catch (err) { busy = ""; fail(err); }
+  } catch (err) { clearBusy(); fail(err); }
 });
 reload();
 </script>
